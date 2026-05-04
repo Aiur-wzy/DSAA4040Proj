@@ -142,7 +142,6 @@ Pending verification:
 - [ ] Verify Nginx SPA fallback works
 - [ ] Verify Nginx `/api` proxy works in Docker Compose
 
-Docker Compose 这一部分的 TODO list 应该重点记录：**它现在只是配置好了，但还没有真实运行验证**。你可以直接把下面这一段加到 `README.md` 或单独的 `TODO.md` 里。
 
 
 ## Docker Compose Runtime Verification TODO
@@ -436,6 +435,486 @@ Expected result:
   * `http://localhost:8080/api/health`
 * [ ] Verify README explains that `/docker-entrypoint-initdb.d/` scripts only run when PostgreSQL volume is first created
 * [ ] Verify README explains when to use `docker compose down -v`
+
+
+
+## Kubernetes Runtime Verification TODO
+
+### 1. Local Kubernetes environment
+
+- [ ] Verify Minikube is installed
+
+```bash
+minikube version
+````
+
+* [ ] Verify kubectl is installed
+
+```bash
+kubectl version --client
+```
+
+* [ ] Start Minikube
+
+```bash
+minikube start
+```
+
+* [ ] Verify cluster is available
+
+```bash
+kubectl cluster-info
+kubectl get nodes
+```
+
+Expected result:
+
+* Minikube starts successfully
+* At least one Kubernetes node is Ready
+
+---
+
+### 2. Build local images for Kubernetes
+
+For Minikube, build images inside Minikube's Docker environment:
+
+```bash
+eval $(minikube docker-env)
+docker build -t bookstore-backend:latest ./backend
+docker build -t bookstore-frontend:latest ./frontend
+```
+
+* [ ] Backend image builds successfully
+* [ ] Frontend image builds successfully
+* [ ] Images are available inside Minikube
+
+```bash
+docker images | grep bookstore
+```
+
+Expected result:
+
+* `bookstore-backend:latest` exists
+* `bookstore-frontend:latest` exists
+
+---
+
+### 3. Apply Kubernetes manifests
+
+* [ ] Apply all manifests
+
+```bash
+kubectl apply -f k8s/
+```
+
+* [ ] Verify namespace exists
+
+```bash
+kubectl get ns bookstore
+```
+
+* [ ] Verify ConfigMap and Secret exist
+
+```bash
+kubectl get configmap -n bookstore
+kubectl get secret -n bookstore
+```
+
+Expected result:
+
+* `bookstore` namespace exists
+* `bookstore-config` exists
+* `bookstore-secret` exists
+
+---
+
+### 4. Verify PostgreSQL deployment
+
+* [ ] Verify PostgreSQL pod is created
+
+```bash
+kubectl get pods -n bookstore -l app=postgres
+```
+
+* [ ] Verify PVC is bound
+
+```bash
+kubectl get pvc -n bookstore
+```
+
+* [ ] Inspect PostgreSQL pod if needed
+
+```bash
+kubectl describe pod -n bookstore -l app=postgres
+```
+
+* [ ] Check PostgreSQL logs
+
+```bash
+kubectl logs -n bookstore -l app=postgres
+```
+
+Expected result:
+
+* PostgreSQL pod reaches `Running`
+* PostgreSQL pod becomes `Ready`
+* `postgres-pvc` is `Bound`
+* No repeated crash loop
+
+---
+
+### 5. Verify backend deployment
+
+* [ ] Verify backend pods are created
+
+```bash
+kubectl get pods -n bookstore -l app=backend
+```
+
+* [ ] Verify backend Deployment status
+
+```bash
+kubectl get deployment backend -n bookstore
+```
+
+* [ ] Check backend logs
+
+```bash
+kubectl logs -n bookstore -l app=backend
+```
+
+Expected result:
+
+* 2 backend pods are created
+* backend pods reach `Running`
+* backend pods become `Ready`
+* backend logs do not show database connection errors after PostgreSQL is ready
+
+---
+
+### 6. Verify frontend deployment
+
+* [ ] Verify frontend pods are created
+
+```bash
+kubectl get pods -n bookstore -l app=frontend
+```
+
+* [ ] Verify frontend Deployment status
+
+```bash
+kubectl get deployment frontend -n bookstore
+```
+
+* [ ] Check frontend logs
+
+```bash
+kubectl logs -n bookstore -l app=frontend
+```
+
+Expected result:
+
+* 2 frontend pods are created
+* frontend pods reach `Running`
+* frontend pods become `Ready`
+* Nginx starts successfully
+
+---
+
+### 7. Verify Kubernetes Services
+
+* [ ] Verify all Services exist
+
+```bash
+kubectl get svc -n bookstore
+```
+
+Expected result:
+
+* `postgres-service`
+
+* `backend-service`
+
+* `frontend-service`
+
+* [ ] Test backend service by port-forward
+
+```bash
+kubectl port-forward -n bookstore service/backend-service 8000:8000
+```
+
+In another terminal:
+
+```bash
+curl http://localhost:8000/api/health
+curl http://localhost:8000/api/health/db
+```
+
+Expected result:
+
+* `/api/health` returns backend OK
+* `/api/health/db` returns database connected, after DB initialization is handled
+
+---
+
+### 8. Database initialization in Kubernetes
+
+Current state: Kubernetes manifests start PostgreSQL, but do not yet automatically execute `schema.sql` and `seed.sql`.
+
+* [ ] Decide database initialization method:
+
+  * manual execution
+  * Kubernetes Job
+  * InitContainer
+  * application startup migration
+
+Recommended for this project: use a simple Kubernetes Job later.
+
+Temporary manual option:
+
+```bash
+kubectl cp database/schema.sql bookstore/<postgres-pod-name>:/tmp/schema.sql
+kubectl cp database/seed.sql bookstore/<postgres-pod-name>:/tmp/seed.sql
+
+kubectl exec -it -n bookstore <postgres-pod-name> -- \
+  psql -U bookstore -d bookstore -f /tmp/schema.sql
+
+kubectl exec -it -n bookstore <postgres-pod-name> -- \
+  psql -U bookstore -d bookstore -f /tmp/seed.sql
+```
+
+Then verify:
+
+```bash
+kubectl exec -it -n bookstore <postgres-pod-name> -- \
+  psql -U bookstore -d bookstore -c "\dt"
+
+kubectl exec -it -n bookstore <postgres-pod-name> -- \
+  psql -U bookstore -d bookstore -c "SELECT COUNT(*) FROM books;"
+```
+
+Expected result:
+
+* Tables are created:
+
+  * `books`
+  * `carts`
+  * `orders`
+  * `order_items`
+* `books` contains 8 seed records
+
+---
+
+### 9. Verify backend database connectivity after initialization
+
+* [ ] Test backend DB health again
+
+```bash
+kubectl port-forward -n bookstore service/backend-service 8000:8000
+curl http://localhost:8000/api/health/db
+curl http://localhost:8000/api/books
+```
+
+Expected result:
+
+* DB health returns connected
+* `/api/books` returns seeded books
+
+---
+
+### 10. Verify Ingress setup
+
+* [ ] Enable Minikube ingress addon
+
+```bash
+minikube addons enable ingress
+```
+
+* [ ] Verify ingress resource exists
+
+```bash
+kubectl get ingress -n bookstore
+```
+
+* [ ] Get Minikube IP
+
+```bash
+minikube ip
+```
+
+* [ ] Add host mapping
+
+Linux/macOS:
+
+```bash
+sudo sh -c 'echo "<minikube-ip> bookstore.local" >> /etc/hosts'
+```
+
+Windows hosts file:
+
+```text
+C:\Windows\System32\drivers\etc\hosts
+```
+
+Add:
+
+```text
+<minikube-ip> bookstore.local
+```
+
+* [ ] Test ingress routes
+
+```bash
+curl http://bookstore.local/api/health
+curl http://bookstore.local/api/books
+```
+
+* [ ] Open frontend page
+
+```text
+http://bookstore.local
+```
+
+Expected result:
+
+* `/api/health` routes to backend
+* `/api/books` returns seeded books
+* `/` routes to frontend
+* Browser page loads correctly
+
+---
+
+### 11. Verify frontend-to-backend flow in Kubernetes
+
+From browser at:
+
+```text
+http://bookstore.local
+```
+
+* [ ] Book list loads
+* [ ] Search works
+* [ ] Add to cart works
+* [ ] Cart quantity update works
+* [ ] Cart item removal works
+* [ ] Place order works
+* [ ] Cart clears after order placement
+* [ ] Order history displays the new order
+* [ ] Stock decreases after order placement
+
+---
+
+### 12. Verify health probes
+
+* [ ] Check pod readiness
+
+```bash
+kubectl get pods -n bookstore
+```
+
+* [ ] Describe backend pod
+
+```bash
+kubectl describe pod -n bookstore -l app=backend
+```
+
+* [ ] Describe frontend pod
+
+```bash
+kubectl describe pod -n bookstore -l app=frontend
+```
+
+Expected result:
+
+* readinessProbe succeeds
+* livenessProbe succeeds
+* backend pods are Ready
+* frontend pods are Ready
+
+---
+
+### 13. Verify HPA
+
+* [ ] Enable metrics-server
+
+```bash
+minikube addons enable metrics-server
+```
+
+* [ ] Verify metrics are available
+
+```bash
+kubectl top nodes
+kubectl top pods -n bookstore
+```
+
+* [ ] Verify HPA exists
+
+```bash
+kubectl get hpa -n bookstore
+```
+
+Expected result:
+
+* `backend-hpa` exists
+* Current CPU utilization can be read
+* No `<unknown>` metrics after metrics-server becomes ready
+
+Optional load test later:
+
+```bash
+hey -z 2m -c 50 http://bookstore.local/api/books
+```
+
+Then observe:
+
+```bash
+kubectl get hpa -n bookstore -w
+kubectl get pods -n bookstore -w
+```
+
+Expected result:
+
+* backend replicas may scale from 2 toward max 5 under sufficient load
+
+---
+
+### 14. Verify cleanup
+
+* [ ] Delete all Kubernetes resources
+
+```bash
+kubectl delete -f k8s/
+```
+
+* [ ] Verify namespace/resources are removed
+
+```bash
+kubectl get ns bookstore
+kubectl get all -n bookstore
+```
+
+Expected result:
+
+* resources are deleted cleanly
+* no unexpected leftover workload resources
+
+---
+
+### 15. Documentation consistency
+
+* [ ] Verify `k8s/README.md` commands are correct
+* [ ] Verify image names match manifests:
+
+  * `bookstore-backend:latest`
+  * `bookstore-frontend:latest`
+* [ ] Verify service names match manifests:
+
+  * `postgres-service`
+  * `backend-service`
+  * `frontend-service`
+* [ ] Verify Ingress host is consistently `bookstore.local`
+* [ ] Verify root README says Kubernetes runtime verification is still pending
 
 
 
