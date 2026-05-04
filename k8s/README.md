@@ -14,6 +14,7 @@ This folder contains a simple Kubernetes baseline for the DSAA 4040 bookstore sy
 - `frontend-service.yaml`: Exposes frontend internally as `frontend-service` (ClusterIP).
 - `ingress.yaml`: Routes `bookstore.local` traffic (`/api` to backend, `/` to frontend).
 - `hpa.yaml`: Adds HPA (`backend-hpa`) for backend CPU autoscaling.
+- `postgres-init-job.yaml`: Runs a one-time PostgreSQL initialization Job using SQL files from a ConfigMap.
 
 ## Local image names required
 - `bookstore-backend:latest`
@@ -62,9 +63,36 @@ kubectl get hpa -n bookstore
 kubectl top pods -n bookstore
 ```
 
-## Database initialization note
-For simplicity, `schema.sql` and `seed.sql` are not auto-mounted/applied in this initial Kubernetes setup.
-Database initialization can be done manually or added later using a Kubernetes Job/InitContainer.
+## PostgreSQL initialization Job
+Create a ConfigMap that mounts SQL files into the Job container:
+```bash
+kubectl create configmap postgres-init-sql \
+  --from-file=01-schema.sql=database/schema.sql \
+  --from-file=02-seed.sql=database/seed.sql \
+  -n bookstore
+```
+
+Apply the Job:
+```bash
+kubectl apply -f k8s/postgres-init-job.yaml
+```
+
+Check Job status and logs:
+```bash
+kubectl get jobs -n bookstore
+kubectl logs job/postgres-init -n bookstore
+```
+
+Verify tables and seed data from inside PostgreSQL pod:
+```bash
+kubectl exec -it -n bookstore deploy/postgres -- \
+  psql -U bookstore -d bookstore -c "\dt"
+
+kubectl exec -it -n bookstore deploy/postgres -- \
+  psql -U bookstore -d bookstore -c "SELECT COUNT(*) FROM books;"
+```
+
+> Warning: `schema.sql` resets tables. Re-running `postgres-init` can clear existing demo data.
 
 ## Pending verification checklist
 - [ ] namespace created
@@ -77,4 +105,4 @@ Database initialization can be done manually or added later using a Kubernetes J
 - [ ] ingress routes frontend and /api correctly
 - [ ] HPA created
 - [ ] health probes work
-- [ ] database initialization strategy verified later
+- [ ] PostgreSQL init Job executed and verified at runtime

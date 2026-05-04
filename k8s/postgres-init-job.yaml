@@ -1,0 +1,43 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: postgres-init
+  namespace: bookstore
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: postgres-init
+          image: postgres:16
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: bookstore-secret
+                  key: DB_PASSWORD
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "Waiting for postgres-service:5432..."
+              until pg_isready -h postgres-service -p 5432 -U bookstore; do
+                sleep 2
+              done
+
+              echo "Running schema initialization..."
+              psql -h postgres-service -U bookstore -d bookstore -f /init-sql/01-schema.sql
+
+              echo "Running seed data initialization..."
+              psql -h postgres-service -U bookstore -d bookstore -f /init-sql/02-seed.sql
+
+              echo "PostgreSQL initialization completed."
+          volumeMounts:
+            - name: init-sql
+              mountPath: /init-sql
+      volumes:
+        - name: init-sql
+          configMap:
+            name: postgres-init-sql
