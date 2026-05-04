@@ -5,6 +5,7 @@
 - Backend API foundation implemented under `backend/`.
 - Frontend page framework implemented under `frontend/`.
 - Docker Compose integration added for local full-stack development.
+- Initial Kubernetes manifest foundation added under `k8s/` (runtime verification pending).
 
 ## Planned Architecture
 Browser → Frontend → Backend API → PostgreSQL Database
