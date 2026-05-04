@@ -120,3 +120,24 @@ Pending verification:
 - [ ] Backend container starts successfully
 - [ ] Containerized backend can connect to PostgreSQL in later Docker Compose setup
 
+
+
+## Frontend Runtime Verification TODO
+
+- [ ] Run `cd frontend && npm install`
+- [ ] Run `npm run build`
+- [ ] Run `npm run dev`
+- [ ] Open `http://localhost:5173`
+- [ ] Verify frontend loads without JavaScript errors
+- [ ] Verify `/api` calls use `VITE_API_BASE_URL`
+- [ ] Verify book list renders when backend is running
+- [ ] Verify search works
+- [ ] Verify add-to-cart works
+- [ ] Verify cart update works
+- [ ] Verify cart delete works
+- [ ] Verify place-order works
+- [ ] Verify order history renders
+- [ ] Verify DB health failure displays warning but does not crash UI
+- [ ] Build frontend Docker image
+- [ ] Verify Nginx SPA fallback works
+- [ ] Verify Nginx `/api` proxy works in Docker Compose
