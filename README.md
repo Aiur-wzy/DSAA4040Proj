@@ -5,7 +5,8 @@
 - Backend API foundation implemented under `backend/`.
 - Frontend page framework implemented under `frontend/`.
 - Docker Compose integration added for local full-stack development.
-- Initial Kubernetes manifest foundation added under `k8s/` (runtime verification pending).
+- Initial Kubernetes manifest foundation added under `k8s/`.
+- Verification, monitoring, and report scaffold support files added under `scripts/` and `report/`.
 
 ## Planned Architecture
 Browser → Frontend → Backend API → PostgreSQL Database
@@ -18,6 +19,9 @@ Browser → Frontend → Backend API → PostgreSQL Database
 - FastAPI backend foundation (health, books, cart, orders)
 - React + Vite frontend page framework (books, cart, orders, health status)
 - Docker Compose setup for db/backend/frontend
+- Kubernetes baseline manifests (namespace/config/deployments/services/ingress/hpa)
+- Kubernetes PostgreSQL init Job manifest
+- Verification helper scripts and report scaffold
 
 ## Docker Compose
 
@@ -60,7 +64,33 @@ docker compose up --build
 - Backend books API: http://localhost:8000/api/books
 - Frontend-proxied API health: http://localhost:8080/api/health
 
-### Docker Compose verification checklist
+## Smoke testing scripts
+- `./scripts/test-api.sh`
+- Override base URL examples:
+  - `BASE_URL=http://localhost:8080 ./scripts/test-api.sh`
+  - `BASE_URL=http://bookstore.local ./scripts/test-api.sh`
+
+## Docker Compose helper scripts
+- `./scripts/compose-status.sh`
+- `./scripts/compose-logs.sh`
+- Example: `./scripts/compose-logs.sh backend`
+
+## Kubernetes helper scripts
+- `./scripts/k8s-apply.sh`
+- `./scripts/k8s-status.sh`
+- `./scripts/k8s-cleanup.sh`
+
+## Monitoring/performance scripts
+- `./scripts/monitor-k8s.sh`
+- `./scripts/perf-test.sh`
+- Performance override example:
+  - `DURATION=2m CONCURRENCY=50 TARGET_URL=http://bookstore.local/api/books ./scripts/perf-test.sh`
+
+## Report scaffold
+- `report/final_report.md`
+- Contains section structure, TODO markers, and placeholders for screenshots/outputs/results.
+
+## Docker Compose verification checklist
 - [ ] db container starts
 - [ ] db healthcheck passes
 - [ ] schema is initialized
@@ -76,4 +106,10 @@ docker compose up --build
 - [ ] order history displays
 
 ## Pending runtime verification
-- Runtime testing may still need to be performed locally if Docker is unavailable in this execution environment.
+- Kubernetes DB init Job not yet executed.
+- API smoke tests not yet executed.
+- Compose helper scripts not yet executed.
+- Kubernetes helper scripts not yet executed.
+- Monitoring/performance scripts not yet executed.
+- Report results still pending real runtime evidence.
+- Runtime testing may still need to be performed locally if Docker/Kubernetes is unavailable in this execution environment.
