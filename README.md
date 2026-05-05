@@ -221,6 +221,17 @@ or
 
 ## 6. Kubernetes / Minikube Deployment Guide
 
+### Recommended local Minikube path
+First verify Docker Compose workflow works, then run:
+
+```bash
+chmod +x scripts/*.sh
+./scripts/k8s-deploy-local.sh
+./scripts/k8s-test-local.sh
+```
+
+The manual `kubectl apply` flow below is still available for debugging and step-by-step validation.
+
 ### 6.1 Start Minikube
 
 ```bash

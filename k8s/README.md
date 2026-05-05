@@ -27,6 +27,18 @@ docker build -t bookstore-backend:latest ./backend
 docker build -t bookstore-frontend:latest ./frontend
 ```
 
+## Recommended local Minikube workflow (automated)
+Run from repository root:
+```bash
+./scripts/k8s-deploy-local.sh
+./scripts/k8s-test-local.sh
+```
+
+This workflow is recommended for local rebuild/redeploy because it:
+- avoids Docker Hub pull failures inside Minikube by loading `postgres:16` from host Docker cache
+- ensures `postgres-init-sql` ConfigMap exists before running `postgres-init` Job
+- avoids manual image tagging/loading mistakes for backend and frontend images
+
 ## Apply manifests
 ```bash
 kubectl apply -f k8s/
