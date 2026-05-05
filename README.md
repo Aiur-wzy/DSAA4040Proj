@@ -221,203 +221,176 @@ or
 
 ## 6. Kubernetes / Minikube Deployment Guide
 
-### Recommended local Minikube path
-First verify Docker Compose workflow works, then run:
+### Recommended flow (student-friendly)
+1. Verify Docker Compose first (`docker compose up --build`, smoke test, then `docker compose down`).
+2. Start Minikube and verify cluster health.
+3. Build/load project images for Minikube.
+4. Deploy namespace + manifests in safe order.
+5. Check pod/job status in namespace `bookstore`.
+6. Test backend through Kubernetes port-forward (not Compose localhost backend).
+7. Optionally enable Ingress and HPA/metrics for extra features.
+
+> `docker compose down` **does not delete images by default**. Optional cleanup: `docker compose down --rmi local` or `docker compose down --rmi all`.
+
+### 6.1 Start Minikube first (required)
+
+Recommended (normal user in docker group):
+```bash
+minikube start --driver=docker --memory=4096 --cpus=2
+minikube status
+kubectl get nodes
+```
+
+Cloud VM/root troubleshooting (coursework only):
+```bash
+minikube start --driver=docker --force --memory=2048 --cpus=2
+```
+
+If default startup fails in restricted networks (for example China/cloud mirrors), try a mirror-focused command and pin a stable Kubernetes version:
+```bash
+minikube start   --driver=docker   --force   --kubernetes-version=v1.32.0   --image-mirror-country=cn   --image-repository=registry.cn-hangzhou.aliyuncs.com/google_containers   --registry-mirror=https://wmbakxsu.mirror.aliyuncs.com   --binary-mirror=https://dl.k8s.io/release   --memory=2048 --cpus=2
+```
+
+> If Minikube system image pulls fail, that is usually an environment/network mirror issue, not a project YAML issue.
+
+### 6.2 Deploy with helper script (recommended)
 
 ```bash
 chmod +x scripts/*.sh
 ./scripts/k8s-deploy-local.sh
-./scripts/k8s-test-local.sh
 ```
 
-The manual `kubectl apply` flow below is still available for debugging and step-by-step validation.
+What this script does:
+- checks required commands (`docker`, `minikube`, `kubectl`, `curl`)
+- verifies Minikube is running
+- applies `k8s/namespace.yaml` first and waits for Active
+- creates/updates `postgres-init-sql` ConfigMap from `database/schema.sql` and `database/seed.sql`
+- deletes/recreates `postgres-init` Job so SQL changes are applied
+- deploys backend/frontend/services/ingress/hpa and waits for readiness
 
-### 6.1 Start Minikube
+> `postgres-init` rerun may reset demo data depending on SQL logic (for example drop/recreate table behavior).
+
+### 6.3 Manual deployment/debug flow
 
 ```bash
-minikube start
-kubectl get nodes
+# 1) namespace first
+kubectl apply -f k8s/namespace.yaml
+kubectl wait --for=jsonpath='{.status.phase}'=Active namespace/bookstore --timeout=60s
+
+# 2) core config + db
+kubectl apply -f k8s/configmap.yaml
+kubectl apply -f k8s/secret.yaml
+kubectl apply -f k8s/postgres-deployment.yaml
+kubectl apply -f k8s/postgres-service.yaml
+
+# 3) create SQL ConfigMap before init job
+kubectl create configmap postgres-init-sql   --from-file=01-schema.sql=database/schema.sql   --from-file=02-seed.sql=database/seed.sql   -n bookstore --dry-run=client -o yaml | kubectl apply -f -
+
+# 4) rerun init job explicitly
+kubectl delete job postgres-init -n bookstore --ignore-not-found
+kubectl apply -f k8s/postgres-init-job.yaml
+kubectl wait --for=condition=complete job/postgres-init -n bookstore --timeout=180s
+
+# 5) app layer
+kubectl apply -f k8s/backend-deployment.yaml
+kubectl apply -f k8s/backend-service.yaml
+kubectl apply -f k8s/frontend-deployment.yaml
+kubectl apply -f k8s/frontend-service.yaml
+kubectl apply -f k8s/ingress.yaml
+kubectl apply -f k8s/hpa.yaml
 ```
 
-### 6.2 Build images inside Minikube
+### 6.4 Image build/load troubleshooting
 
-Because manifests use `imagePullPolicy: IfNotPresent` with local image names, build images inside Minikube's Docker environment:
+Kubernetes manifests use local image names with `imagePullPolicy: IfNotPresent`, so images must exist in Minikube runtime.
 
+Option A (build in Minikube Docker env):
 ```bash
 eval $(minikube docker-env)
 docker build -t bookstore-backend:latest ./backend
 docker build -t bookstore-frontend:latest ./frontend
-docker images | grep bookstore
 ```
 
-> Windows PowerShell uses a different environment setup command. Run `minikube docker-env` and follow the PowerShell output.
-
-### 6.3 Apply base Kubernetes manifests
-
+Option B (build/pull on host and load to Minikube):
 ```bash
-kubectl apply -f k8s/
+eval $(minikube docker-env -u)
+docker images | grep -E "bookstore|python|node|nginx|postgres"
+minikube image load bookstore-backend:latest
+minikube image load bookstore-frontend:latest
+minikube image load postgres:16
+minikube image load nginx:alpine
 ```
 
-`kubectl apply` creates or updates resources from YAML files.
+If Minikube-side build cannot pull Docker Hub base images (`python:3.12-slim`, `node:20-alpine`, `nginx:alpine`, `postgres:16`), pull on host first then `minikube image load`, or configure mirrors.
 
-### 6.4 Inspect resources
+### 6.5 Test Kubernetes backend correctly (avoid Compose false positives)
 
+Compose test target:
 ```bash
-kubectl get all -n bookstore
-kubectl get pvc -n bookstore
-kubectl get svc -n bookstore
-kubectl get ingress -n bookstore
-kubectl get hpa -n bookstore
+BASE_URL=http://localhost:8000 ./scripts/test-api.sh
 ```
+(works only when Compose backend is mapped to host)
 
-or
-
+Kubernetes test target (recommended):
 ```bash
-./scripts/k8s-status.sh
+./scripts/k8s-test-local.sh
 ```
+This script creates its own `kubectl port-forward` to backend-service on localhost:18000, so it cannot accidentally reuse Compose on port 8000.
 
-### 6.5 Kubernetes database initialization
-
-PostgreSQL starts via Deployment/PVC, but schema + seed data require the `postgres-init` Job.
-
-```bash
-kubectl create configmap postgres-init-sql \
-  --from-file=01-schema.sql=database/schema.sql \
-  --from-file=02-seed.sql=database/seed.sql \
-  -n bookstore
-
-kubectl apply -f k8s/postgres-init-job.yaml
-
-kubectl get jobs -n bookstore
-kubectl logs job/postgres-init -n bookstore
-```
-
-Verify database:
-
-```bash
-kubectl get pods -n bookstore -l app=postgres
-```
-
-Then:
-
-```bash
-kubectl exec -it -n bookstore <postgres-pod-name> -- psql -U bookstore -d bookstore -c "\dt"
-kubectl exec -it -n bookstore <postgres-pod-name> -- psql -U bookstore -d bookstore -c "SELECT COUNT(*) FROM books;"
-```
-
-Expected result:
-- four tables exist
-- `books` count is 8
-
-> Warning: `schema.sql` drops and recreates tables. Re-running the Job can reset demo data.
-
-### 6.6 Test backend service with port-forward
-
+Manual equivalent:
 ```bash
 kubectl port-forward -n bookstore service/backend-service 8000:8000
+BASE_URL=http://localhost:8000 ./scripts/test-api.sh
 ```
 
-In another terminal:
-
+Before claiming Kubernetes success, verify:
 ```bash
-curl http://localhost:8000/api/health
-curl http://localhost:8000/api/health/db
-curl http://localhost:8000/api/books
+kubectl get all -n bookstore
 ```
+Expected essentials:
+- postgres Pod: Running
+- postgres-init Job: Completed
+- backend/frontend Pods: Running
 
-### 6.7 Enable Ingress
+### 6.6 Ingress testing
 
+Enable and verify ingress controller:
 ```bash
 minikube addons enable ingress
+kubectl get pods -n ingress-nginx
+kubectl get ingress -n bookstore
 ```
 
-Get Minikube IP:
-
+Test from server:
 ```bash
-minikube ip
+curl -H "Host: bookstore.local" http://$(minikube ip)/api/health
 ```
 
-Add hosts entry:
+In cloud VM/headless environments, browser access from your laptop may require hosts/DNS mapping or SSH tunnel.
 
-```text
-<minikube-ip> bookstore.local
-```
+### 6.7 HPA / metrics-server testing
 
-Windows hosts file path:
-
-```text
-C:\Windows\System32\drivers\etc\hosts
-```
-
-### 6.8 Test Ingress
-
-```bash
-curl http://bookstore.local/api/health
-curl http://bookstore.local/api/books
-```
-
-Open in browser:
-
-```text
-http://bookstore.local
-```
-
-Run smoke test through Ingress:
-
-```bash
-BASE_URL=http://bookstore.local ./scripts/test-api.sh
-```
-
-### 6.9 Enable metrics-server and check HPA
+HPA may show `cpu: <unknown>/50%` until metrics-server is enabled and data is collected.
 
 ```bash
 minikube addons enable metrics-server
-
-kubectl top nodes
 kubectl top pods -n bookstore
 kubectl get hpa -n bookstore
 ```
 
-or
+### 6.8 Cleanup
 
 ```bash
-./scripts/monitor-k8s.sh
-```
-
-Metrics may take time to appear after enabling metrics-server.
-
-### 6.10 Run performance test
-
-```bash
-TARGET_URL=http://bookstore.local/api/books ./scripts/perf-test.sh
-```
-
-Stronger load example:
-
-```bash
-TARGET_URL=http://bookstore.local/api/books DURATION=2m CONCURRENCY=50 ./scripts/perf-test.sh
-```
-
-Observe scaling:
-
-```bash
-kubectl get hpa -n bookstore -w
-kubectl get pods -n bookstore -w
-```
-
-### 6.11 Cleanup Kubernetes resources
-
-```bash
-kubectl delete -f k8s/
-```
-
-or
-
-```bash
+# delete app resources
 ./scripts/k8s-cleanup.sh
-```
 
----
+# full reset helper (optional namespace deletion)
+./scripts/k8s-reset-local.sh
+./scripts/k8s-reset-local.sh --delete-namespace
+
+# stop Minikube
+minikube stop
+```
 
 ## 7. Kubernetes Verification Checklist
 
