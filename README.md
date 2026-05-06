@@ -154,6 +154,12 @@ curl "http://${MINIKUBE_IP}:30080/api/health/db"
 curl "http://${MINIKUBE_IP}:30080/api/books"
 ```
 
+```bash
+#check pods
+kubectl get pods -n bookstore -o wide
+kubectl get all -n bookstore
+```
+
 Important: `minikube kubectl -- apply ...` returning `unchanged` does **not** mean running Pods are using your new image. If the Deployment spec still says `bookstore-frontend:latest` or `bookstore-backend:latest`, Kubernetes may keep existing Pods. Always reload images into Minikube and run `rollout restart` for repeated local-image development.
 
 Shortcut when you want the helper script to do the rebuild/load/apply/restart path:
