@@ -225,6 +225,34 @@ To remove the demo forwarding rules, run cleanup with the same ports:
 PUBLIC_PORT=3000 NODE_PORT=30080 ./scripts/k8s-expose-demo.sh --cleanup
 ```
 
+
+## 4.5 Admin Demo catalog test case
+
+The frontend includes a simple **Admin Demo** page for catalog and inventory management. It is intentionally unauthenticated for course/demo simplicity; do not treat it as a production admin surface. The page supports adding books, deleting books, and increasing or decreasing stock while preventing negative inventory values.
+
+This feature is useful as a practical test case when verifying that frontend and backend code changes were rebuilt, loaded into Minikube, and rolled out correctly. After changing the Admin Demo or its API, use the standardized workflow:
+
+```bash
+./scripts/k8s-rebuild-and-deploy.sh
+./scripts/k8s-test-local.sh
+./scripts/k8s-status.sh
+```
+
+To exercise the admin API directly against a running backend, run:
+
+```bash
+./scripts/test-admin-api.sh
+```
+
+`test-admin-api.sh` uses `BASE_URL=http://localhost:8000` by default. Override `BASE_URL` to test through the frontend proxy or Minikube NodePort, for example:
+
+```bash
+BASE_URL=http://localhost:8080 ./scripts/test-admin-api.sh
+BASE_URL=http://$(minikube ip):30080 ./scripts/test-admin-api.sh
+```
+
+Book deletion may return a clear conflict error when the book is referenced by historical `order_items`; the demo preserves historical orders instead of deleting them.
+
 ## 5. First-Time Deployment
 
 Use this only for a clean cluster or a fresh Minikube profile.
@@ -321,6 +349,13 @@ Run the API smoke test against the backend default URL:
 
 ```bash
 BASE_URL=http://localhost:8080 ./scripts/test-api.sh
+```
+
+Run the admin API smoke test to create a temporary book, increase stock, decrease stock, delete the temporary book, and list books again:
+
+```bash
+./scripts/test-admin-api.sh
+BASE_URL=http://localhost:8080 ./scripts/test-admin-api.sh
 ```
 
 Inspect logs when a Compose check fails:

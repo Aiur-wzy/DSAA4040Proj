@@ -73,3 +73,24 @@ export function placeOrder() {
 export function getOrders() {
   return request("/api/orders");
 }
+
+
+export function createBook(book) {
+  return request("/api/admin/books", {
+    method: "POST",
+    body: JSON.stringify(book)
+  });
+}
+
+export function updateBookStock(bookId, delta) {
+  return request(`/api/admin/books/${bookId}/stock`, {
+    method: "PATCH",
+    body: JSON.stringify({ delta })
+  });
+}
+
+export function deleteBook(bookId) {
+  return request(`/api/admin/books/${bookId}`, {
+    method: "DELETE"
+  });
+}
