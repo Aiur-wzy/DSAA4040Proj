@@ -2,7 +2,7 @@
 
 ## 1. Current Implementation Summary
 
-The repository implements a functional three-tier DSAA4040 cloud-native online bookstore baseline: a React/Vite frontend served by Nginx, a FastAPI backend, and PostgreSQL storage. Core demo flows exist for catalog browsing/search, cart operations, order placement, order history, stock deduction, Docker Compose deployment, and Minikube/Kubernetes deployment. The main remaining work is hardening final-demo workflows, collecting runtime evidence, improving initialization safety, validating autoscaling/Ingress in the target environment, and documenting reliable public exposure using `socat` instead of the older iptables DNAT approach.
+The repository implements a functional three-tier DSAA4040 cloud-native online bookstore baseline: a React/Vite frontend served by Nginx, a FastAPI backend, and PostgreSQL storage. Core demo flows exist for catalog browsing/search, cart operations, order placement, order history, stock deduction, Docker Compose deployment, and Minikube/Kubernetes deployment. The main remaining work is hardening final-demo workflows, collecting runtime evidence, improving initialization safety, validating autoscaling/Ingress in the target environment, and documenting reliable public exposure using the verified iptables DNAT approach with Docker-aware forwarding rules.
 
 ## 2. Completed Features
 
@@ -112,14 +112,14 @@ The repository implements a functional three-tier DSAA4040 cloud-native online b
 
 ## 3. Partially Completed Features
 
-- [ ] External browser demo exposure  
-  - What exists now: `scripts/k8s-expose-demo.sh` validates the NodePort service and adds iptables DNAT/MASQUERADE/FORWARD rules.
-  - What is missing: the known reliable workaround for the current cloud server is not encoded in the script. Use:
+- [x] External browser demo exposure
+  - What exists now: `scripts/k8s-expose-demo.sh` validates the NodePort service and inserts verified iptables DNAT/MASQUERADE, bidirectional `FORWARD`, and bidirectional `DOCKER-USER` rules.
+  - Remaining evidence work: run the script on the target cloud server, test from another machine, and save browser/curl, tcpdump, and iptables counter output.
+  - Documented command:
     ```bash
-    MINIKUBE_IP=$(minikube ip)
-    sudo socat TCP-LISTEN:3000,fork,reuseaddr,bind=0.0.0.0 TCP:${MINIKUBE_IP}:30080
+    PUBLIC_PORT=3000 NODE_PORT=30080 ./scripts/k8s-expose-demo.sh
     ```
-  - Files needing changes: `scripts/k8s-expose-demo.sh`, `README.md`, `k8s/README.md`.
+  - Files updated: `scripts/k8s-expose-demo.sh`, `README.md`, `k8s/README.md`.
 
 - [ ] Ingress usability in Minikube/cloud demo  
   - What exists now: `k8s/ingress.yaml` routes `bookstore.local` to frontend and `/api` to backend.
@@ -150,7 +150,7 @@ The repository implements a functional three-tier DSAA4040 cloud-native online b
 
 | Area | Expected in Proposal | Current Status | Gap | Recommended Fix |
 |------|----------------------|----------------|-----|-----------------|
-| External demo exposure | Browser-accessible demo from cloud server | iptables DNAT script exists | Known unreliable in current cloud environment | Replace or augment `scripts/k8s-expose-demo.sh` with a `socat` mode and document the exact command |
+| External demo exposure | Browser-accessible demo from cloud server | Verified iptables DNAT script exists | Needs final runtime evidence from target cloud server | Run `scripts/k8s-expose-demo.sh`, test from another machine, and save tcpdump/counter evidence |
 | Ingress usability | Working Ingress route for frontend and API | Manifest exists for `bookstore.local` | Needs addon/hosts setup and runtime proof | Enable ingress addon, test `Host: bookstore.local`, add evidence to report |
 | HPA real functionality | Autoscaling under load | HPA manifest exists | Needs metrics-server and observed metrics/scaling output | Add metrics-server step and capture `get hpa` before/during load |
 | Metrics-server dependency | Clear prerequisite for HPA/top commands | Mentioned in docs/scripts | Not enforced or verified by deploy/test scripts | Add a preflight warning/check in `monitor-k8s.sh` or HPA verification docs |
@@ -161,13 +161,13 @@ The repository implements a functional three-tier DSAA4040 cloud-native online b
 | Frontend API proxy | Works in Compose and Kubernetes | Nginx proxy plus Compose alias works | Dev server path still needs `VITE_API_BASE_URL`; behavior should be documented | Document all modes and optionally add Vite dev proxy |
 | Script kubectl behavior | Use standalone `kubectl` or `minikube kubectl --` correctly | Shared helper supports fallback | README still contains at least one plain `kubectl get pods` example | Standardize docs/scripts on helper or `minikube kubectl --` |
 | Stale image handling | Avoid stale local images in Minikube | Rebuild script loads images and restarts deployments | Manual workflow can still forget this | Keep using `scripts/k8s-rebuild-and-deploy.sh`; add evidence checklist |
-| Public exposure reliability | Repeatable public demo URL | Current script uses iptables | Known issue on current server | Prefer `socat` for final demo; optionally keep iptables as advanced mode |
+| Public exposure reliability | Repeatable public demo URL | Script uses Docker-aware iptables insertion and cleanup | Needs final runtime proof | Capture external curl/browser result plus iptables counters |
 | Final report evidence | Completed final report | Scaffold only | Most sections are TODO | Fill `report/final_report.md` with screenshots and command outputs |
 | Automated tests | Repeatable verification | Smoke scripts only | No pytest/unit tests or CI | Add lightweight backend API tests with mocked/test DB or Compose-based CI notes |
 
 ## 5. What Still Needs to Be Improved Before Final Submission
 
-- [ ] Update external exposure workflow to use `socat` as the reliable final-demo method.
+- [x] Update external exposure workflow to use the verified Docker-aware iptables DNAT method; keep `socat` only as an optional fallback/debugging method.
 - [ ] Run and record Docker Compose smoke tests:
   - [ ] `docker compose up --build`
   - [ ] `./scripts/test-api.sh`
@@ -185,9 +185,9 @@ The repository implements a functional three-tier DSAA4040 cloud-native online b
 
 ## 6. Practical Next-Step Priorities
 
-1. **Fix final demo exposure first.** Add a `socat` path to `scripts/k8s-expose-demo.sh` and update README instructions, because public access is a known blocker.
+1. **Capture final demo exposure evidence first.** Run `PUBLIC_PORT=3000 NODE_PORT=30080 ./scripts/k8s-expose-demo.sh`, test from another machine, and save browser/curl, tcpdump, and iptables counter output.
 2. **Generate final evidence.** Run Compose and Kubernetes smoke scripts, save terminal output, and take frontend/API screenshots.
 3. **Validate HPA honestly.** Enable metrics-server, run load test, and document whether scaling actually occurs or only HPA creation is demonstrated.
 4. **Harden database init story.** Decide whether the project uses destructive reset scripts for demos or idempotent initialization for repeatable deployments; document the choice clearly.
 5. **Complete final report.** Replace scaffold TODOs with architecture, endpoint table, manifests summary, evidence, problems/solutions, and limitations.
-6. **Polish docs and commands.** Keep the Minikube workflow consistent: build images, load images, apply manifests, restart deployments, test NodePort, then expose with `socat`.
+6. **Polish docs and commands.** Keep the Minikube workflow consistent: build images, load images, apply manifests, restart deployments, test NodePort, then expose with the verified iptables script.

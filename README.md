@@ -224,30 +224,66 @@ curl "http://${MINIKUBE_IP}:30080/api/books"
 
 ### 4.5 Expose Browser Demo
 
-Forward public host port `3000` to `$(minikube ip):30080`. The helper script adds the required iptables forwarding rules:
-```bash
-MINIKUBE_IP=$(minikube ip)
-nohup sudo socat TCP-LISTEN:3000,fork,reuseaddr,bind=0.0.0.0 TCP:${MINIKUBE_IP}:30080 > socat-demo.log 2>&1 &
-```
-暴露接口，然后后面的有bug不管了
+`frontend-service` is exposed inside Kubernetes as a NodePort on `30080`. In this Minikube-on-cloud-server setup, `$(minikube ip)` is an internal Minikube address, so public browser access needs host-level forwarding from public host port `3000` to `$(minikube ip):30080`.
+
 ```bash
 PUBLIC_PORT=3000 ./scripts/k8s-expose-demo.sh
 ```
 
-Manual equivalent:
-
-```bash
-MINIKUBE_IP=$(minikube ip)
-sudo sysctl -w net.ipv4.ip_forward=1
-sudo iptables -t nat -A PREROUTING -p tcp --dport 3000 -j DNAT --to-destination "${MINIKUBE_IP}:30080"
-sudo iptables -t nat -A POSTROUTING -p tcp -d "${MINIKUBE_IP}" --dport 30080 -j MASQUERADE
-sudo iptables -A FORWARD -p tcp -d "${MINIKUBE_IP}" --dport 30080 -j ACCEPT
-```
-
-Your cloud firewall/security group must allow inbound TCP `3000`. Then open:
+Your cloud firewall/security group must allow inbound TCP `3000`. Then open the demo with HTTP, not HTTPS:
 
 ```text
 http://<server-public-ip>:3000
+```
+
+Manual equivalent for the verified iptables method:
+
+```bash
+MINIKUBE_IP=$(minikube ip)
+
+sudo sysctl -w net.ipv4.ip_forward=1
+
+sudo iptables -t nat -I PREROUTING 1 \
+  -p tcp --dport 3000 \
+  -j DNAT --to-destination "${MINIKUBE_IP}:30080"
+
+sudo iptables -t nat -I POSTROUTING 1 \
+  -p tcp -d "${MINIKUBE_IP}" --dport 30080 \
+  -j MASQUERADE
+
+sudo iptables -I FORWARD 1 \
+  -p tcp -d "${MINIKUBE_IP}" --dport 30080 \
+  -m conntrack --ctstate NEW,ESTABLISHED,RELATED \
+  -j ACCEPT
+
+sudo iptables -I FORWARD 1 \
+  -p tcp -s "${MINIKUBE_IP}" --sport 30080 \
+  -m conntrack --ctstate ESTABLISHED,RELATED \
+  -j ACCEPT
+
+sudo iptables -I DOCKER-USER 1 \
+  -p tcp -d "${MINIKUBE_IP}" --dport 30080 \
+  -j ACCEPT
+
+sudo iptables -I DOCKER-USER 1 \
+  -p tcp -s "${MINIKUBE_IP}" --sport 30080 \
+  -j ACCEPT
+```
+
+This is a demo exposure method for a single-node Minikube environment. In production Kubernetes, a cloud `LoadBalancer` Service or an Ingress controller backed by a public load balancer is more standard.
+
+To remove the demo forwarding rules, run cleanup with the same ports:
+
+```bash
+PUBLIC_PORT=3000 NODE_PORT=30080 ./scripts/k8s-expose-demo.sh --cleanup
+```
+
+The verified iptables DNAT method is the main scripted method. `socat` can remain a simple fallback/debugging method, but do not run `socat` and iptables DNAT for the same public port at the same time. Stop `socat` first if you use iptables DNAT:
+
+```bash
+sudo pkill socat
+MINIKUBE_IP=$(minikube ip)
+nohup sudo socat TCP-LISTEN:3000,fork,reuseaddr,bind=0.0.0.0 TCP:${MINIKUBE_IP}:30080 > socat-demo.log 2>&1 &
 ```
 
 ## 5. First-Time Deployment
@@ -384,21 +420,29 @@ For a detailed Kubernetes resource snapshot, run:
 
 ### 6.4 Public browser demo verification
 
-To expose the Kubernetes frontend outside the host, run:
+Verify the local Kubernetes NodePort first, then expose the public demo port:
 
 ```bash
+./scripts/k8s-test-local.sh
 PUBLIC_PORT=3000 ./scripts/k8s-expose-demo.sh
 ```
 
-The expose script verifies that `frontend-service` is a NodePort service using nodePort `30080`, then adds `iptables` forwarding from the host public TCP port (`PUBLIC_PORT`, default `3000`) to `$(minikube ip):30080`. It only exposes `frontend-service`; it does not publicly expose `backend-service` or `postgres-service`.
+The expose script verifies that `frontend-service` is a NodePort service using nodePort `30080`, then inserts iptables DNAT/MASQUERADE, bidirectional `FORWARD`, and bidirectional `DOCKER-USER` allow rules for Docker/Minikube environments. It forwards host public TCP `PUBLIC_PORT` (default `3000`) to `$(minikube ip):30080` and only exposes `frontend-service`.
 
-After running it, verify the browser demo at:
+Your cloud firewall or security group must allow inbound TCP `3000` or whichever `PUBLIC_PORT` you choose. Test DNAT forwarding from an external browser or another machine:
+
+```bash
+curl -v http://<server-public-ip>:3000/api/health
+sudo tcpdump -ni any 'tcp port 3000 or tcp port 30080'
+```
+
+Expected packet behavior: the external request reaches `server:3000`, the server replies with `SYN-ACK`, and the forwarding rule packet counters increase. Do not use `curl http://127.0.0.1:3000` to test DNAT because local loopback traffic does not go through `PREROUTING`.
+
+Open the browser demo with HTTP, not HTTPS:
 
 ```text
 http://<server-public-ip>:3000
 ```
-
-Your cloud firewall or security group must allow inbound TCP `3000` or whichever `PUBLIC_PORT` you choose.
 
 ### 6.5 Monitoring and performance verification
 
