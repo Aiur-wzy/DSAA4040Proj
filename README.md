@@ -32,7 +32,7 @@ The project demonstrates:
 database/
 backend/
 frontend/
-docker-compose.yaml
+docker-compose.yml
 k8s/
 scripts/
 report/
@@ -41,7 +41,7 @@ report/
 - `database/`: PostgreSQL SQL files (`schema.sql`, `seed.sql`, `test.sql`, `place_order.sql`) for schema setup, seed data, and SQL validation/transaction scripts.
 - `backend/`: FastAPI backend service source and backend Dockerfile.
 - `frontend/`: React/Vite frontend served by Nginx, including frontend Dockerfile and Nginx config.
-- `docker-compose.yaml`: local full-stack orchestration for `db`, `backend`, and `frontend`.
+- `docker-compose.yml`: local full-stack orchestration for `db`, `backend`, and `frontend`; Compose builds `bookstore-backend:latest` and `bookstore-frontend:latest`, matching the Kubernetes Deployment images.
 - `k8s/`: Kubernetes manifests (namespace, ConfigMap, Secret, Deployments, PVC, Services, Ingress, HPA, and PostgreSQL init Job).
 - `scripts/`: helper scripts for smoke testing, Compose status/logs, Kubernetes apply/status/cleanup, monitoring, and performance testing.
 - `report/`: final report scaffold (`report/final_report.md`) for screenshots, command output, and analysis.
@@ -81,6 +81,8 @@ hey -h
 ```bash
 docker compose up --build
 ```
+
+`docker compose build` and `docker compose up --build` now create the same image tags used by Kubernetes: `bookstore-backend:latest` and `bookstore-frontend:latest`. Because these explicit image names are set in `docker-compose.yml`, Compose should no longer create project-prefixed image names such as `dsaa4040proj-main-backend` or `dsaa4040proj-main-frontend` for these services.
 
 or
 
@@ -224,11 +226,12 @@ or
 ### Recommended flow (student-friendly)
 1. Verify Docker Compose first (`docker compose up --build`, smoke test, then `docker compose down`).
 2. Start Minikube and verify cluster health.
-3. Build/load project images for Minikube.
-4. Deploy namespace + manifests in safe order.
-5. Check pod/job status in namespace `bookstore`.
-6. Test backend through Kubernetes port-forward (not Compose localhost backend).
-7. Optionally enable Ingress and HPA/metrics for extra features.
+3. Run `./scripts/k8s-rebuild-and-deploy.sh` as the recommended one-pass Kubernetes deployment path.
+4. Check pod/job status in namespace `bookstore`.
+5. Test backend through Kubernetes port-forward (not Compose localhost backend).
+6. Optionally enable Ingress and HPA/metrics for extra features.
+
+Docker Compose and Kubernetes now share the same application image names: `bookstore-backend:latest` and `bookstore-frontend:latest`. The backend also has a Compose network alias named `backend-service`, matching the Kubernetes Service DNS name, so frontend Nginx can proxy `/api` to `http://backend-service:8000` in both environments without manual retagging or config patching.
 
 > `docker compose down` **does not delete images by default**. Optional cleanup: `docker compose down --rmi local` or `docker compose down --rmi all`.
 
@@ -257,16 +260,20 @@ minikube start   --driver=docker   --force   --kubernetes-version=v1.32.0   --im
 
 ```bash
 chmod +x scripts/*.sh
-./scripts/k8s-deploy-local.sh
+./scripts/k8s-rebuild-and-deploy.sh
 ```
 
 What this script does:
-- checks required commands (`docker`, `minikube`, `kubectl`, `curl`)
+- sets a robust `PATH` and fails fast with `set -euo pipefail`
+- checks required commands (`docker`, `minikube`, `kubectl`) and the Docker Compose plugin
 - verifies Minikube is running
+- switches back to the host Docker environment and runs `docker compose build backend frontend`
+- verifies `bookstore-backend:latest` and `bookstore-frontend:latest` exist
+- loads both images into Minikube
 - applies `k8s/namespace.yaml` first and waits for Active
 - creates/updates `postgres-init-sql` ConfigMap from `database/schema.sql` and `database/seed.sql`
 - deletes/recreates `postgres-init` Job so SQL changes are applied
-- deploys backend/frontend/services/ingress/hpa and waits for readiness
+- deploys backend/frontend/services/ingress/hpa, restarts backend/frontend, waits for rollout status, and prints `kubectl get all -n bookstore`
 
 > `postgres-init` rerun may reset demo data depending on SQL logic (for example drop/recreate table behavior).
 
@@ -302,7 +309,7 @@ kubectl apply -f k8s/hpa.yaml
 
 ### 6.4 Image build/load troubleshooting
 
-Kubernetes manifests use local image names with `imagePullPolicy: IfNotPresent`, so images must exist in Minikube runtime.
+Kubernetes manifests use local image names with `imagePullPolicy: IfNotPresent`, so images must exist in Minikube runtime. Prefer `./scripts/k8s-rebuild-and-deploy.sh`; it builds the Compose services with the same `bookstore-*` tags that the Kubernetes manifests use, verifies the tags exist, and loads them into Minikube.
 
 Option A (build in Minikube Docker env):
 ```bash
@@ -311,14 +318,13 @@ docker build -t bookstore-backend:latest ./backend
 docker build -t bookstore-frontend:latest ./frontend
 ```
 
-Option B (build/pull on host and load to Minikube):
+Option B (build on host with Compose and load to Minikube):
 ```bash
 eval $(minikube docker-env -u)
-docker images | grep -E "bookstore|python|node|nginx|postgres"
+docker compose build backend frontend
+docker image inspect bookstore-backend:latest bookstore-frontend:latest
 minikube image load bookstore-backend:latest
 minikube image load bookstore-frontend:latest
-minikube image load postgres:16
-minikube image load nginx:alpine
 ```
 
 If Minikube-side build cannot pull Docker Hub base images (`python:3.12-slim`, `node:20-alpine`, `nginx:alpine`, `postgres:16`), pull on host first then `minikube image load`, or configure mirrors.
@@ -445,7 +451,7 @@ minikube stop
 ### Problem: frontend loads but API fails
 **Fix:**
 - Check frontend Nginx `/api` proxy.
-- In Compose, backend service name must be `backend`.
+- In Compose, frontend Nginx uses the backend network alias `backend-service`.
 - In Kubernetes, Ingress `/api` should route to `backend-service:8000`.
 - Test with `curl /api/health`.
 
