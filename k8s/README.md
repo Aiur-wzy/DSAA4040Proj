@@ -31,7 +31,7 @@ Run from repository root:
 ```bash
 ./scripts/k8s-rebuild-and-deploy.sh
 ./scripts/k8s-test-local.sh
-./scripts/k8s-expose-demo.sh
+PUBLIC_PORT=3000 ./scripts/k8s-expose-demo.sh
 ```
 
 This workflow is recommended for local rebuild/redeploy because it:
@@ -40,6 +40,33 @@ This workflow is recommended for local rebuild/redeploy because it:
 - avoids Docker Hub pull failures inside Minikube by loading `postgres:16` from host Docker cache when available
 - ensures `postgres-init-sql` ConfigMap exists before running `postgres-init` Job
 - avoids manual image tagging/loading mistakes for backend and frontend images
+
+
+## Public browser demo from a cloud-hosted Minikube node
+`frontend-service` is a NodePort on `30080`. On a cloud server running Docker-backed Minikube, `$(minikube ip)` is usually internal to the host, so the public demo uses host iptables forwarding from `PUBLIC_PORT` (default `3000`) to `$(minikube ip):30080`:
+
+```bash
+./scripts/k8s-test-local.sh
+PUBLIC_PORT=3000 NODE_PORT=30080 ./scripts/k8s-expose-demo.sh
+```
+
+Allow inbound TCP `3000` in the cloud firewall/security group, then open `http://<server-public-ip>:3000` (HTTP, not HTTPS). The script inserts DNAT and forwarding rules at position `1` so they are evaluated before Docker-managed chains, and it also adds bidirectional `DOCKER-USER` allow rules.
+
+Verify from another machine, not with loopback on the server:
+
+```bash
+curl -v http://<server-public-ip>:3000/api/health
+sudo tcpdump -ni any 'tcp port 3000 or tcp port 30080'
+sudo iptables -L FORWARD -n -v --line-numbers | grep "30080"
+```
+
+Expected behavior is that the external SYN reaches `server:3000`, the host responds with a SYN-ACK, and iptables packet counters increase. Remove rules with:
+
+```bash
+PUBLIC_PORT=3000 NODE_PORT=30080 ./scripts/k8s-expose-demo.sh --cleanup
+```
+
+This is a single-node Minikube demo method. Production Kubernetes should normally use a cloud `LoadBalancer` Service or an Ingress controller backed by a public load balancer.
 
 ## Apply manifests
 ```bash
