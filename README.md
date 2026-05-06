@@ -588,3 +588,55 @@ Collect screenshots and command outputs for `report/final_report.md`.
 - `report/final_report.md` contains placeholders that should be filled with real screenshots and outputs.
 
 > This README is a practical deployment/test guide and intentionally separates **expected results** from actual runtime outcomes.
+
+## In-app Monitoring / HPA Dashboard
+The bookstore includes a lightweight, read-only Monitoring page for the Kubernetes HPA demo. The React frontend calls the existing FastAPI backend at `GET /api/admin/cluster/status`; the backend then reads Kubernetes Deployment, HPA, Pod, and metrics status with the Kubernetes API. The browser never calls the Kubernetes API directly.
+
+The dashboard shows:
+- backend Deployment desired, ready, available, and updated replicas
+- backend HPA min/max replicas, current/desired replicas, current CPU utilization, and target CPU utilization
+- backend Pods with phase, readiness, restart count, start time, CPU, and memory when metrics are available
+- frontend-only time-series charts for backend replicas and HPA CPU utilization
+
+The dashboard does not add Prometheus, Grafana, another microservice, a database, or any Kubernetes mutation controls. Its chart history is kept only in browser memory and resets when the page refreshes.
+
+Recommended HPA demo flow:
+
+```bash
+./scripts/k8s-rebuild-and-deploy.sh
+./scripts/k8s-fix-metrics-server.sh
+```
+
+Then open the bookstore frontend in the browser and click **Monitoring**. In another terminal, run:
+
+```bash
+./scripts/k8s-hpa-demo.sh
+```
+
+Expected behavior:
+- before load: backend has 2 replicas and low CPU
+- during load: CPU rises above the 50% HPA target
+- backend replicas increase toward `maxReplicas=5`
+- new backend Pods appear in the Pods table
+- the replicas chart rises from 2 toward 5
+- the CPU chart rises above the target line
+- after load stops: CPU decreases, and after the HPA scale-down delay replicas eventually return to 2
+
+Metrics-server is required for CPU and memory values. If the dashboard says metrics are unavailable, run:
+
+```bash
+./scripts/k8s-fix-metrics-server.sh
+```
+
+Then verify metrics with `kubectl top pods` or the Minikube equivalent.
+
+Screenshot/evidence checklist for the final report:
+- Monitoring page before load
+- HPA card before load
+- replicas chart before load
+- load generator terminal
+- Monitoring page during load
+- replicas chart showing 2 -> 5
+- CPU chart showing utilization rising above target
+- backend Pods table showing new Pods
+- Monitoring page after load showing scale-down if captured

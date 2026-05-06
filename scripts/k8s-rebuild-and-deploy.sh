@@ -278,6 +278,7 @@ apply_manifests() {
     "${KUBECTL[@]}" wait --for=condition=complete job/postgres-init -n "$NAMESPACE" --timeout=180s
   fi
 
+  "${KUBECTL[@]}" apply -f k8s/backend-rbac.yaml
   "${KUBECTL[@]}" apply -f k8s/backend-service.yaml
   "${KUBECTL[@]}" apply -f k8s/backend-deployment.yaml
   "${KUBECTL[@]}" apply -f k8s/frontend-service.yaml
