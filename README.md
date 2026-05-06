@@ -91,7 +91,16 @@ edit code/config
   -> expose browser demo
 ```
 
+
+
 All Kubernetes commands below use `minikube kubectl --` so they work on servers without standalone `kubectl`.
+
+
+
+```bash
+chmod +x scripts/*.sh
+```
+
 
 ### 4.1 Recommended Update Flow
 
