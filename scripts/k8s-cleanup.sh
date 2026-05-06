@@ -2,7 +2,14 @@
 set -euo pipefail
 export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"
 
-command -v kubectl >/dev/null 2>&1 || { echo "Error: kubectl not found"; exit 1; }
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/k8s.sh
+source "${SCRIPT_DIR}/lib/k8s.sh"
+
+resolve_kubectl
+require_minikube_running
+
+echo "Using Kubernetes command: ${KUBECTL_MODE}"
 echo "WARNING: This deletes Kubernetes resources in namespace 'bookstore'."
-kubectl delete -f k8s/ --ignore-not-found=true
-kubectl delete configmap postgres-init-sql -n bookstore --ignore-not-found=true
+"${KUBECTL[@]}" delete -f k8s/ --ignore-not-found=true
+"${KUBECTL[@]}" delete configmap postgres-init-sql -n bookstore --ignore-not-found=true

@@ -2,23 +2,30 @@
 set -euo pipefail
 export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"
 
-command -v kubectl >/dev/null 2>&1 || { echo "Error: kubectl not found"; exit 1; }
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/k8s.sh
+source "${SCRIPT_DIR}/lib/k8s.sh"
+
+resolve_kubectl
+require_minikube_running
+
+echo "Using Kubernetes command: ${KUBECTL_MODE}"
 
 echo "=== Pods ==="
-kubectl get pods -n bookstore
+"${KUBECTL[@]}" get pods -n bookstore
 
 echo
 echo "=== HPA ==="
-kubectl get hpa -n bookstore
+"${KUBECTL[@]}" get hpa -n bookstore
 
 echo
 echo "=== Node metrics ==="
-kubectl top nodes
+"${KUBECTL[@]}" top nodes
 
 echo
 echo "=== Pod metrics ==="
-kubectl top pods -n bookstore
+"${KUBECTL[@]}" top pods -n bookstore
 
 echo
-echo "Hint: if kubectl top fails, enable metrics-server:"
+echo "Hint: if metrics are unavailable, enable metrics-server:"
 echo "minikube addons enable metrics-server"

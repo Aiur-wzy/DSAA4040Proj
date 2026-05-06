@@ -2,16 +2,64 @@
 set -euo pipefail
 export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"
 
-command -v kubectl >/dev/null 2>&1 || { echo "Error: kubectl not found"; exit 1; }
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/k8s.sh
+source "${SCRIPT_DIR}/lib/k8s.sh"
 
-echo "=== Kubernetes resources (bookstore namespace) ==="
-kubectl get all -n bookstore
+NAMESPACE="bookstore"
+
+resolve_kubectl
+require_minikube
+
+echo "=== Minikube status ==="
+if minikube status; then
+  MINIKUBE_RUNNING=true
+else
+  MINIKUBE_RUNNING=false
+fi
 
 echo
-kubectl get pvc -n bookstore
+echo "=== Minikube IP ==="
+if [[ "$MINIKUBE_RUNNING" == "true" ]]; then
+  minikube ip
+else
+  echo "Unavailable because Minikube is not running."
+fi
 
 echo
-kubectl get ingress -n bookstore
+echo "=== Kubernetes command mode ==="
+echo "$KUBECTL_MODE"
+
+if [[ "$MINIKUBE_RUNNING" != "true" ]]; then
+  echo
+  echo "Error: Minikube is not running. Start it first with: minikube start --driver=docker --memory=4096 --cpus=2" >&2
+  exit 1
+fi
 
 echo
-kubectl get hpa -n bookstore
+echo "=== All resources in namespace '${NAMESPACE}' ==="
+"${KUBECTL[@]}" get all -n "$NAMESPACE"
+
+echo
+echo "=== Pods ==="
+"${KUBECTL[@]}" get pods -n "$NAMESPACE" -o wide
+
+echo
+echo "=== Services ==="
+"${KUBECTL[@]}" get services -n "$NAMESPACE" -o wide
+
+echo
+echo "=== Ingress ==="
+"${KUBECTL[@]}" get ingress -n "$NAMESPACE"
+
+echo
+echo "=== HPA ==="
+"${KUBECTL[@]}" get hpa -n "$NAMESPACE"
+
+echo
+echo "=== backend-service endpoints ==="
+"${KUBECTL[@]}" get endpoints backend-service -n "$NAMESPACE" -o wide
+
+echo
+echo "=== frontend-service endpoints ==="
+"${KUBECTL[@]}" get endpoints frontend-service -n "$NAMESPACE" -o wide
