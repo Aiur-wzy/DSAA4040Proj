@@ -45,6 +45,13 @@ report/
 - `k8s/`: Kubernetes manifests (namespace, ConfigMap, Secret, Deployments, PVC, Services, Ingress, HPA, and PostgreSQL init Job).
 - `scripts/`: helper scripts for smoke testing, Compose status/logs, Kubernetes apply/status/cleanup, monitoring, and performance testing.
 - `report/`: final report scaffold (`report/final_report.md`) for screenshots, command output, and analysis.
+- `docs/demo_manual.md`: live demo runbook for final presentation preparation.
+- `docs/architecture_and_defense_notes.md`: detailed architecture, design rationale, and defense Q&A notes.
+
+## Final Demo and Defense Preparation
+
+- [Live demo manual](docs/demo_manual.md)
+- [Architecture and defense notes](docs/architecture_and_defense_notes.md)
 
 ---
 
