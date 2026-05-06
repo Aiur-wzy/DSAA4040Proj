@@ -23,14 +23,13 @@ This folder contains a simple Kubernetes baseline for the DSAA 4040 bookstore sy
 For Minikube image builds:
 ```bash
 eval $(minikube docker-env)
-docker build -t bookstore-backend:latest ./backend
-docker build -t bookstore-frontend:latest ./frontend
+docker compose build backend frontend
 ```
 
 ## Recommended local Minikube workflow (automated)
 Run from repository root:
 ```bash
-./scripts/k8s-deploy-local.sh
+./scripts/k8s-rebuild-and-deploy.sh
 ./scripts/k8s-test-local.sh
 ```
 
