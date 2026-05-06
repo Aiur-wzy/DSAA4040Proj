@@ -290,7 +290,163 @@ minikube kubectl -- apply -f k8s/ingress.yaml
 minikube kubectl -- apply -f k8s/hpa.yaml
 ```
 
-## 6. Docker Compose Local Check
+## 6. Testing and Verification
+
+Use the scripts in `scripts/` to verify the same deployment features consistently after either a Docker Compose run or a Minikube deployment. All commands below should be run from the repository root.
+
+### 6.1 Permission setup
+
+Make the top-level helper scripts executable before running them:
+
+```bash
+chmod +x scripts/*.sh
+```
+
+The shared helper file `scripts/lib/k8s.sh` is sourced by Kubernetes scripts; it does not need to be executed directly.
+
+### 6.2 Docker Compose verification
+
+Use Docker Compose for local full-stack integration before or separate from Kubernetes:
+
+```bash
+./scripts/compose-up.sh
+```
+
+`compose-up.sh` runs `docker compose up --build`, so it builds and starts the database, backend, and frontend services in the foreground. In another terminal, verify service status and useful local URLs:
+
+```bash
+./scripts/compose-status.sh
+```
+
+The status script prints `docker compose ps` and these expected local endpoints:
+
+- Frontend: `http://localhost:8080`
+- Backend health: `http://localhost:8000/api/health`
+- Backend DB health: `http://localhost:8000/api/health/db`
+- Backend books API: `http://localhost:8000/api/books`
+- Frontend-proxied API route: `http://localhost:8080/api/health`
+
+Run the API smoke test against the backend default URL:
+
+```bash
+./scripts/test-api.sh
+```
+
+`test-api.sh` uses `BASE_URL=http://localhost:8000` by default and checks this flow: `/api/health`, `/api/health/db`, `/api/books`, `/api/cart`, add to cart, cart after add, create order, and order history. To test a different endpoint, override `BASE_URL`:
+
+```bash
+BASE_URL=http://localhost:8080 ./scripts/test-api.sh
+```
+
+Inspect logs when a Compose check fails:
+
+```bash
+./scripts/compose-logs.sh
+./scripts/compose-logs.sh backend
+```
+
+Stop the Compose stack when finished:
+
+```bash
+./scripts/compose-down.sh
+```
+
+### 6.3 Kubernetes deployment verification
+
+After Minikube is running, use the rebuild/deploy helper for the full local-image Kubernetes workflow:
+
+```bash
+./scripts/k8s-rebuild-and-deploy.sh
+```
+
+This script checks prerequisites, builds Docker Compose images on the host Docker daemon, verifies `bookstore-backend:latest` and `bookstore-frontend:latest`, loads them into Minikube, creates or updates the `postgres-init-sql` ConfigMap from `database/schema.sql` and `database/seed.sql`, applies the Kubernetes manifests, restarts the backend and frontend deployments, waits for rollout completion, and prints the Minikube NodePort URL.
+
+Then verify the deployed Kubernetes application:
+
+```bash
+./scripts/k8s-test-local.sh
+```
+
+`k8s-test-local.sh` verifies that Minikube is running, the `bookstore` namespace exists, Pods are `Running` or `Completed`, `frontend-service` is a `NodePort` on port `30080`, and the Minikube NodePort responds successfully for:
+
+- `/`
+- `/api/health`
+- `/api/health/db`
+- `/api/books`
+
+For a detailed Kubernetes resource snapshot, run:
+
+```bash
+./scripts/k8s-status.sh
+```
+
+`k8s-status.sh` prints Minikube status, Minikube IP, the resolved Kubernetes command mode (`kubectl` or `minikube kubectl --`), all resources in the `bookstore` namespace, Pods, Services, Ingress, HPA, and backend/frontend service endpoints.
+
+### 6.4 Public browser demo verification
+
+To expose the Kubernetes frontend outside the host, run:
+
+```bash
+PUBLIC_PORT=3000 ./scripts/k8s-expose-demo.sh
+```
+
+The expose script verifies that `frontend-service` is a NodePort service using nodePort `30080`, then adds `iptables` forwarding from the host public TCP port (`PUBLIC_PORT`, default `3000`) to `$(minikube ip):30080`. It only exposes `frontend-service`; it does not publicly expose `backend-service` or `postgres-service`.
+
+After running it, verify the browser demo at:
+
+```text
+http://<server-public-ip>:3000
+```
+
+Your cloud firewall or security group must allow inbound TCP `3000` or whichever `PUBLIC_PORT` you choose.
+
+### 6.5 Monitoring and performance verification
+
+Check Kubernetes runtime metrics with:
+
+```bash
+./scripts/monitor-k8s.sh
+```
+
+The monitoring script prints Pods, HPA status, node metrics, and pod metrics for the `bookstore` namespace. If metrics are unavailable, enable the Minikube metrics server:
+
+```bash
+minikube addons enable metrics-server
+```
+
+Run a load test with:
+
+```bash
+TARGET_URL=http://$(minikube ip):30080/api/books DURATION=60s CONCURRENCY=20 ./scripts/perf-test.sh
+```
+
+`perf-test.sh` uses `hey` when it is installed. If `hey` is not available, it falls back to a 20-request `curl` loop. By default, without environment overrides, it targets `http://localhost:8080/api/books` for `60s` at concurrency `20`.
+
+### 6.6 Cleanup and reset helpers
+
+Use cleanup when you want to remove Kubernetes resources defined under `k8s/` without deleting the namespace:
+
+```bash
+./scripts/k8s-cleanup.sh
+```
+
+Use reset when you want to remove Kubernetes demo data and potentially PVC-backed PostgreSQL data in the `bookstore` namespace:
+
+```bash
+./scripts/k8s-reset-local.sh
+```
+
+By default, `k8s-reset-local.sh` keeps the namespace. To delete the namespace too, run:
+
+```bash
+./scripts/k8s-reset-local.sh --delete-namespace
+```
+
+### 6.7 Script behavior notes
+
+The Kubernetes helper scripts source `scripts/lib/k8s.sh`. That helper resolves standalone `kubectl` when available and otherwise falls back to `minikube kubectl --`; it also enforces required commands and ensures Minikube is running where needed. This means the scripts should work on Minikube-only servers without requiring a shell alias for `kubectl`.
+
+## 7. Docker Compose Local Check
 
 Docker Compose is useful for local integration before loading images into Minikube:
 
@@ -307,7 +463,7 @@ Useful Compose URLs:
 - Backend DB health: http://localhost:8000/api/health/db
 - Backend books API: http://localhost:8000/api/books
 
-## 7. Evidence Collection for Final Report
+## 8. Evidence Collection for Final Report
 
 Collect screenshots and command outputs for `report/final_report.md`.
 
@@ -342,7 +498,7 @@ Collect screenshots and command outputs for `report/final_report.md`.
 
 ---
 
-## 8. Current Runtime Status
+## 9. Current Runtime Status
 
 - The project contains deployment and testing support files for Docker Compose and Kubernetes.
 - Runtime verification should be performed locally in your environment.
