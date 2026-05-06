@@ -10,6 +10,7 @@ import {
   removeCartItem,
   updateCartItem
 } from "./api";
+import AdminBooks from "./components/AdminBooks";
 import BookList from "./components/BookList";
 import Cart from "./components/Cart";
 import OrderHistory from "./components/OrderHistory";
@@ -25,6 +26,7 @@ function App() {
   const [error, setError] = useState("");
   const [backendStatus, setBackendStatus] = useState("Unknown");
   const [dbStatus, setDbStatus] = useState("Unknown");
+  const [page, setPage] = useState("store");
 
   const refreshBooks = async (searchTerm = "") => {
     const result = await getBooks(searchTerm);
@@ -132,11 +134,27 @@ function App() {
     }
   };
 
+  if (page === "admin") {
+    return (
+      <div className="app">
+        <AdminBooks
+          onBack={() => setPage("store")}
+          onBooksChanged={() => Promise.all([refreshBooks(search), refreshCart()])}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="app">
-      <header>
-        <h1>DSAA 4040 Online Bookstore</h1>
-        <p>Backend status: {backendStatus} | DB status: {dbStatus}</p>
+      <header className="store-header">
+        <div>
+          <h1>DSAA 4040 Online Bookstore</h1>
+          <p>Backend status: {backendStatus} | DB status: {dbStatus}</p>
+        </div>
+        <button type="button" onClick={() => setPage("admin")}>
+          Admin Demo
+        </button>
       </header>
 
       <StatusMessage message={message} error={error} />

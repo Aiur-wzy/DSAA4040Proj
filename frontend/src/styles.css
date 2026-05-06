@@ -124,3 +124,64 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 }
+
+.store-header,
+.admin-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.admin-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.admin-form {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr)) auto;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.admin-form label {
+  display: grid;
+  gap: 0.25rem;
+  font-weight: 600;
+}
+
+.admin-book-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.admin-book-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 0.75rem;
+  background: #f9fafb;
+}
+
+.admin-book-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+@media (max-width: 900px) {
+  .admin-form {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .admin-book-row,
+  .store-header,
+  .admin-header {
+    flex-direction: column;
+  }
+}
