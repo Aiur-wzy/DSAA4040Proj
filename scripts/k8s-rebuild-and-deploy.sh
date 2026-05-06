@@ -27,6 +27,41 @@ manifest_first_value() {
   awk -v wanted="${key}:" '$1 == wanted { print $2; exit }' "$file"
 }
 
+manifest_replicas() {
+  local file="$1"
+  local fallback="$2"
+  local replicas
+
+  replicas="$(awk '$1 == "replicas:" { print $2; exit }' "$file")"
+  printf '%s\n' "${replicas:-$fallback}"
+}
+
+is_single_component_image() {
+  local image="$1"
+  local image_without_digest="${image%%@*}"
+  local image_without_tag="$image_without_digest"
+
+  if [[ "$image_without_tag" == *":"* && "$image_without_tag" != *"/"* ]]; then
+    image_without_tag="${image_without_tag%%:*}"
+  elif [[ "$image_without_tag" == */* ]]; then
+    local last_component="${image_without_tag##*/}"
+    local prefix="${image_without_tag%/*}"
+    if [[ "$last_component" == *":"* ]]; then
+      image_without_tag="${prefix}/${last_component%%:*}"
+    fi
+  fi
+
+  [[ "$image_without_tag" != */* ]]
+}
+
+docker_library_alias() {
+  local image="$1"
+
+  if is_single_component_image "$image"; then
+    printf 'docker.io/library/%s\n' "$image"
+  fi
+}
+
 compose_service_image() {
   local service="$1"
   awk -v service="${service}:" '
@@ -95,9 +130,105 @@ build_backend() {
   image_exists "$BACKEND_IMAGE" || fail "Missing image ${BACKEND_IMAGE} after backend build."
 }
 
+verify_backend_host_image() {
+  local found
+
+  found="$(docker run --rm "$BACKEND_IMAGE" find / -name "admin_books.py" 2>/dev/null || true)"
+  if [[ -z "$found" ]]; then
+    fail "Host backend image ${BACKEND_IMAGE} does not contain admin_books.py. Check backend/Dockerfile, docker-compose.yml build context, and .dockerignore, then rebuild."
+  fi
+
+  info "Verified host backend image contains admin_books.py:"
+  printf '%s\n' "$found"
+}
+
 build_frontend() {
   (cd "$REPO_ROOT" && eval "$(minikube docker-env -u)" && docker compose build frontend)
   image_exists "$FRONTEND_IMAGE" || fail "Missing image ${FRONTEND_IMAGE} after frontend build."
+}
+
+deployment_exists() {
+  local deployment="$1"
+  "${KUBECTL[@]}" get "deployment/${deployment}" -n "$NAMESPACE" >/dev/null 2>&1
+}
+
+save_replica_counts() {
+  local backend_default
+  local frontend_default
+
+  backend_default="$(manifest_replicas "$BACKEND_DEPLOYMENT_MANIFEST" 2)"
+  frontend_default="$(manifest_replicas "$FRONTEND_DEPLOYMENT_MANIFEST" 2)"
+
+  if deployment_exists "$BACKEND_DEPLOYMENT"; then
+    BACKEND_REPLICAS="$("${KUBECTL[@]}" get "deployment/${BACKEND_DEPLOYMENT}" -n "$NAMESPACE" -o jsonpath='{.spec.replicas}')"
+  else
+    BACKEND_REPLICAS="$backend_default"
+  fi
+
+  if deployment_exists "$FRONTEND_DEPLOYMENT"; then
+    FRONTEND_REPLICAS="$("${KUBECTL[@]}" get "deployment/${FRONTEND_DEPLOYMENT}" -n "$NAMESPACE" -o jsonpath='{.spec.replicas}')"
+  else
+    FRONTEND_REPLICAS="$frontend_default"
+  fi
+
+  BACKEND_REPLICAS="${BACKEND_REPLICAS:-$backend_default}"
+  FRONTEND_REPLICAS="${FRONTEND_REPLICAS:-$frontend_default}"
+
+  info "Saved desired replica counts: ${BACKEND_DEPLOYMENT}=${BACKEND_REPLICAS}, ${FRONTEND_DEPLOYMENT}=${FRONTEND_REPLICAS}"
+}
+
+wait_for_pods_gone() {
+  local label_selector="$1"
+  local description="$2"
+  local timeout_seconds=180
+  local elapsed=0
+  local pods
+  local pods_display
+
+  while (( elapsed < timeout_seconds )); do
+    pods="$("${KUBECTL[@]}" get pods -n "$NAMESPACE" -l "$label_selector" -o name 2>/dev/null || true)"
+    if [[ -z "$pods" ]]; then
+      info "All ${description} Pods are gone."
+      return 0
+    fi
+    sleep 3
+    elapsed=$((elapsed + 3))
+  done
+
+  pods_display="$(printf '%s' "$pods" | tr '\n' ',' | sed 's/,$//; s/,/, /g')"
+  fail "Timed out waiting for old ${description} Pods to terminate before replacing same-tag images. Remaining Pods: ${pods_display}"
+}
+
+scale_deployments_to_zero() {
+  if deployment_exists "$BACKEND_DEPLOYMENT"; then
+    "${KUBECTL[@]}" scale "deployment/${BACKEND_DEPLOYMENT}" -n "$NAMESPACE" --replicas=0
+    wait_for_pods_gone "app=backend" "backend"
+  else
+    info "Backend deployment ${BACKEND_DEPLOYMENT} does not exist yet; skipping scale-down."
+  fi
+
+  if deployment_exists "$FRONTEND_DEPLOYMENT"; then
+    "${KUBECTL[@]}" scale "deployment/${FRONTEND_DEPLOYMENT}" -n "$NAMESPACE" --replicas=0
+    wait_for_pods_gone "app=frontend" "frontend"
+  else
+    info "Frontend deployment ${FRONTEND_DEPLOYMENT} does not exist yet; skipping scale-down."
+  fi
+}
+
+remove_minikube_image() {
+  local image="$1"
+  local alias
+
+  minikube ssh -- docker rmi -f "$image" || true
+  alias="$(docker_library_alias "$image" || true)"
+  if [[ -n "$alias" && "$alias" != "$image" ]]; then
+    minikube ssh -- docker rmi -f "$alias" || true
+  fi
+}
+
+remove_old_minikube_images() {
+  remove_minikube_image "$BACKEND_IMAGE"
+  remove_minikube_image "$FRONTEND_IMAGE"
 }
 
 load_images() {
@@ -155,14 +286,30 @@ apply_manifests() {
   "${KUBECTL[@]}" apply -f k8s/hpa.yaml
 }
 
-restart_deployments() {
-  "${KUBECTL[@]}" rollout restart "deployment/${BACKEND_DEPLOYMENT}" -n "$NAMESPACE"
-  "${KUBECTL[@]}" rollout restart "deployment/${FRONTEND_DEPLOYMENT}" -n "$NAMESPACE"
+restore_replica_counts() {
+  "${KUBECTL[@]}" scale "deployment/${BACKEND_DEPLOYMENT}" -n "$NAMESPACE" --replicas="$BACKEND_REPLICAS"
+  "${KUBECTL[@]}" scale "deployment/${FRONTEND_DEPLOYMENT}" -n "$NAMESPACE" --replicas="$FRONTEND_REPLICAS"
 }
 
 wait_for_rollout() {
   "${KUBECTL[@]}" rollout status "deployment/${BACKEND_DEPLOYMENT}" -n "$NAMESPACE" --timeout=240s
   "${KUBECTL[@]}" rollout status "deployment/${FRONTEND_DEPLOYMENT}" -n "$NAMESPACE" --timeout=240s
+}
+
+verify_running_backend_image() {
+  local backend_pod
+  local found
+
+  backend_pod="$("${KUBECTL[@]}" get pod -n "$NAMESPACE" -l app=backend -o jsonpath='{.items[0].metadata.name}')"
+  [[ -n "$backend_pod" ]] || fail "Could not find a running backend Pod to verify admin_books.py after rollout."
+
+  found="$("${KUBECTL[@]}" exec -n "$NAMESPACE" "$backend_pod" -- find / -name "admin_books.py" 2>/dev/null || true)"
+  if [[ -z "$found" ]]; then
+    fail "Stale Minikube image detected: backend Pod ${backend_pod} does not contain admin_books.py after loading ${BACKEND_IMAGE}. Scale backend/frontend to 0, remove old same-tag images inside Minikube, reload images, and redeploy."
+  fi
+
+  info "Verified running backend Pod ${backend_pod} contains admin_books.py:"
+  printf '%s\n' "$found"
 }
 
 print_summary() {
@@ -183,10 +330,15 @@ SUMMARY
 }
 
 preflight
-run_stage "[1/6] Building backend image..." build_backend
-run_stage "[2/6] Building frontend image..." build_frontend
-run_stage "[3/6] Loading images into Minikube..." load_images
-run_stage "[4/6] Applying Kubernetes manifests..." apply_manifests
-run_stage "[5/6] Restarting deployments to avoid stale images..." restart_deployments
-run_stage "[6/6] Waiting for rollout..." wait_for_rollout
+run_stage "[1/10] Building backend image..." build_backend
+run_stage "[2/10] Verifying backend image contents..." verify_backend_host_image
+run_stage "[3/10] Building frontend image..." build_frontend
+run_stage "[4/10] Saving current replica counts..." save_replica_counts
+run_stage "[5/10] Scaling backend/frontend to zero before replacing stable tags..." scale_deployments_to_zero
+run_stage "[6/10] Removing old same-tag images inside Minikube..." remove_old_minikube_images
+run_stage "[7/10] Loading fresh images into Minikube..." load_images
+run_stage "[8/10] Applying Kubernetes manifests..." apply_manifests
+run_stage "[9/10] Restoring replica counts and waiting for rollout..." restore_replica_counts
+wait_for_rollout
+run_stage "[10/10] Verifying running backend image contents..." verify_running_backend_image
 print_summary

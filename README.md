@@ -251,6 +251,15 @@ BASE_URL=http://localhost:8080 ./scripts/test-admin-api.sh
 BASE_URL=http://$(minikube ip):30080 ./scripts/test-admin-api.sh
 ```
 
+If a newly added route still returns `404` after a rebuild/deploy, verify that the running backend Pod actually contains the new route file before debugging application routing. For the admin API route, for example:
+
+```bash
+BACKEND_POD=$(minikube kubectl -- get pod -n bookstore -l app=backend -o jsonpath='{.items[0].metadata.name}')
+minikube kubectl -- exec -n bookstore "$BACKEND_POD" -- find / -name "admin_books.py" 2>/dev/null
+```
+
+No output means the Pod is still running a stale image or the file was not copied into the image. Re-run `./scripts/k8s-rebuild-and-deploy.sh`; it should fail clearly if the host image or running Pod is missing `admin_books.py`.
+
 Book deletion may return a clear conflict error when the book is referenced by historical `order_items`; the demo preserves historical orders instead of deleting them.
 
 ## 5. First-Time Deployment
@@ -379,7 +388,9 @@ After Minikube is running, use the rebuild/deploy helper for the full local-imag
 ./scripts/k8s-rebuild-and-deploy.sh
 ```
 
-This script checks prerequisites, builds Docker Compose images on the host Docker daemon, verifies `bookstore-backend:latest` and `bookstore-frontend:latest`, loads them into Minikube, creates or updates the `postgres-init-sql` ConfigMap from `database/schema.sql` and `database/seed.sql`, applies the Kubernetes manifests, restarts the backend and frontend deployments, waits for rollout completion, and prints the Minikube NodePort URL.
+This script checks prerequisites, builds Docker Compose images on the host Docker daemon, verifies `bookstore-backend:latest` and `bookstore-frontend:latest`, confirms that the host backend image contains the admin route file, and then performs a safe stable-tag refresh for Minikube. Because this demo intentionally uses stable local image tags such as `:latest`, the script saves the current backend/frontend replica counts, temporarily scales only those Deployments down to zero, waits for their old Pods to exit, removes the old same-tag backend/frontend images inside Minikube, loads the freshly built images, applies the Kubernetes manifests, restores the saved replica counts, waits for rollout completion, verifies that a running backend Pod contains `admin_books.py`, and prints the Minikube NodePort URL.
+
+The safe refresh does **not** stop PostgreSQL. The PostgreSQL Deployment, Service, PVC-backed data, `postgres-init-sql` ConfigMap update, and `FORCE_POSTGRES_INIT` behavior remain unchanged; only the backend and frontend application Pods are temporarily stopped while their same-tag local images are replaced.
 
 Then verify the deployed Kubernetes application:
 
