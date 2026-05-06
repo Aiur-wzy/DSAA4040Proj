@@ -57,7 +57,7 @@ report/
 ### For Kubernetes workflow
 - Docker
 - Minikube
-- optional: `hey` (for performance testing)
+- optional: `hey` for general performance testing; required for `./scripts/k8s-hpa-demo.sh`
 
 Use `minikube kubectl --` for Kubernetes commands so the guide works on Minikube-only servers where standalone `kubectl` is not installed. Do not rely on interactive shell aliases inside scripts; Bash scripts do not reliably inherit aliases such as `alias kubectl='minikube kubectl --'`.
 
@@ -70,7 +70,7 @@ minikube version
 hey -h
 ```
 
-> `hey` is optional. Performance scripts may provide fallback behavior if `hey` is not installed.
+> `hey` is required for the repeatable HPA demo because small ad hoc `curl` loops are not enough to demonstrate autoscaling reliably. Other performance scripts may provide fallback behavior if `hey` is not installed.
 
 ---
 
@@ -261,6 +261,49 @@ minikube kubectl -- exec -n bookstore "$BACKEND_POD" -- find / -name "admin_book
 No output means the Pod is still running a stale image or the file was not copied into the image. Re-run `./scripts/k8s-rebuild-and-deploy.sh`; it should fail clearly if the host image or running Pod is missing `admin_books.py`.
 
 Book deletion may return a clear conflict error when the book is referenced by historical `order_items`; the demo preserves historical orders instead of deleting them.
+
+
+## 4.6 HPA metrics-server repair and autoscaling demo
+
+Kubernetes HPA needs the Metrics API from `metrics-server` before it can calculate CPU utilization. If `backend-hpa` shows `cpu: <unknown>/50%`, repair and verify metrics-server with:
+
+```bash
+./scripts/k8s-fix-metrics-server.sh
+```
+
+The repair script enables the Minikube metrics-server addon, checks for image pull failures, replaces a bad tag+digest image with a valid tag-only metrics-server image when needed, waits for rollout completion, verifies `kubectl top nodes` and `kubectl top pods -n bookstore`, and confirms HPA no longer reports `<unknown>`.
+
+Run the repeatable HPA demo with:
+
+```bash
+./scripts/k8s-hpa-demo.sh
+```
+
+Optional custom load example:
+
+```bash
+DURATION=240s CONCURRENCY=30 ./scripts/k8s-hpa-demo.sh
+```
+
+Expected behavior:
+
+- Before load: backend has 2 replicas, CPU is low, and HPA shows a known value such as `cpu: 3%/50%`.
+- During load: CPU rises above the 50% target and backend scales from 2 replicas to 3, 4, or 5 replicas.
+- After load: backend eventually scales back down to 2 replicas; scale-down may take several minutes because HPA uses stabilization behavior.
+
+HPA CPU percentages are relative to each container's CPU request, not total node CPU. For example, if the backend requests `100m` CPU and uses `300m` CPU, HPA can report about `300%`.
+
+Screenshot/evidence checklist for the final report:
+
+- HPA before load
+- pod CPU before load
+- `hey` load generator output
+- HPA during load
+- backend Deployment scaling from 2 to more replicas
+- backend Pods being created (`Pending -> ContainerCreating -> Running -> Ready`)
+- pod CPU during load
+- `kubectl describe hpa backend-hpa -n bookstore` output
+- scale-down evidence if captured
 
 ## 5. First-Time Deployment
 
