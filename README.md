@@ -225,7 +225,11 @@ curl "http://${MINIKUBE_IP}:30080/api/books"
 ### 4.5 Expose Browser Demo
 
 Forward public host port `3000` to `$(minikube ip):30080`. The helper script adds the required iptables forwarding rules:
-
+```bash
+MINIKUBE_IP=$(minikube ip)
+nohup sudo socat TCP-LISTEN:3000,fork,reuseaddr,bind=0.0.0.0 TCP:${MINIKUBE_IP}:30080 > socat-demo.log 2>&1 &
+```
+暴露接口，然后后面的有bug不管了
 ```bash
 PUBLIC_PORT=3000 ./scripts/k8s-expose-demo.sh
 ```
