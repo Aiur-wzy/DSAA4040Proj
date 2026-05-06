@@ -2,55 +2,85 @@
 set -euo pipefail
 export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/k8s.sh
+source "${SCRIPT_DIR}/lib/k8s.sh"
+
 NAMESPACE="bookstore"
-PF_PID=""
+EXPECTED_NODE_PORT="30080"
 
+pass() { echo "PASS: $1"; }
+fail() { echo "FAIL: $1" >&2; exit 1; }
 step() { echo; echo "==== $1 ===="; }
-fail() { echo "Error: $1" >&2; exit 1; }
-require_cmd() { command -v "$1" >/dev/null 2>&1 || fail "required command '$1' not found in PATH"; }
 
-cleanup() {
-  if [[ -n "$PF_PID" ]] && kill -0 "$PF_PID" >/dev/null 2>&1; then
-    kill "$PF_PID" >/dev/null 2>&1 || true
-    wait "$PF_PID" 2>/dev/null || true
+http_body() {
+  local url="$1"
+  curl -fsS --max-time 15 "$url"
+}
+
+expect_http_200() {
+  local url="$1"
+  local code
+  code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "$url")" || fail "$url did not respond"
+  [[ "$code" == "200" ]] || fail "$url returned HTTP $code, expected 200"
+  pass "$url returned HTTP 200"
+}
+
+expect_body_contains() {
+  local url="$1"
+  local pattern="$2"
+  local description="$3"
+  local body
+  body="$(http_body "$url")" || fail "$url request failed"
+  if grep -Eqi "$pattern" <<<"$body"; then
+    pass "$description"
+  else
+    echo "Response body from $url:" >&2
+    echo "$body" >&2
+    fail "$description"
   fi
 }
-trap cleanup EXIT
 
 step "Checking prerequisites"
-require_cmd kubectl
-require_cmd minikube
+resolve_kubectl
+require_minikube_running
 require_cmd curl
+echo "Using Kubernetes command: ${KUBECTL_MODE}"
+pass "required commands are available"
 
-if ! minikube status --format='{{.Host}} {{.Kubelet}} {{.APIServer}}' 2>/dev/null | grep -Eq 'Running Running Running'; then
-  fail "Minikube is not running. Start it first and rerun this script."
+step "Checking Kubernetes namespace and resources"
+"${KUBECTL[@]}" get namespace "$NAMESPACE" >/dev/null || fail "namespace '$NAMESPACE' not found"
+pass "namespace '$NAMESPACE' exists"
+
+pod_report="$("${KUBECTL[@]}" get pods -n "$NAMESPACE" --no-headers 2>/dev/null || true)"
+[[ -n "$pod_report" ]] || fail "no pods found in namespace '$NAMESPACE'"
+not_ready="$(awk '$3 != "Running" && $3 != "Completed" {print}' <<<"$pod_report")"
+if [[ -n "$not_ready" ]]; then
+  echo "$not_ready" >&2
+  fail "one or more pods are not Running or Completed"
 fi
+pass "pods are Running or Completed"
 
-kubectl get namespace "$NAMESPACE" >/dev/null || fail "namespace '$NAMESPACE' not found"
-kubectl get service -n "$NAMESPACE" backend-service >/dev/null || fail "service/backend-service not found in namespace '$NAMESPACE'"
+"${KUBECTL[@]}" get service -n "$NAMESPACE" frontend-service >/dev/null || fail "service/frontend-service not found in namespace '$NAMESPACE'"
+pass "frontend-service exists"
 
-step "Starting dedicated Kubernetes backend port-forward on localhost:18000"
-kubectl port-forward -n "$NAMESPACE" service/backend-service 18000:8000 >/tmp/k8s-port-forward.log 2>&1 &
-PF_PID=$!
+service_type="$("${KUBECTL[@]}" get service frontend-service -n "$NAMESPACE" -o jsonpath='{.spec.type}')"
+[[ "$service_type" == "NodePort" ]] || fail "frontend-service is type '$service_type', expected NodePort"
+pass "frontend-service is NodePort"
 
-for _ in $(seq 1 20); do
-  if curl -fsS http://localhost:18000/api/health >/dev/null 2>&1; then
-    break
-  fi
-  sleep 1
-done
-curl -fsS http://localhost:18000/api/health >/dev/null || {
-  echo "Port-forward logs:"
-  cat /tmp/k8s-port-forward.log || true
-  fail "port-forward/backend health check did not become ready"
-}
+node_port="$("${KUBECTL[@]}" get service frontend-service -n "$NAMESPACE" -o jsonpath='{.spec.ports[0].nodePort}')"
+[[ "$node_port" == "$EXPECTED_NODE_PORT" ]] || fail "frontend-service nodePort is '$node_port', expected $EXPECTED_NODE_PORT"
+pass "frontend-service nodePort is $EXPECTED_NODE_PORT"
 
-step "Running direct backend endpoint checks"
-curl -fS http://localhost:18000/api/health
-curl -fS http://localhost:18000/api/health/db
-curl -fS http://localhost:18000/api/books
+MINIKUBE_IP="$(minikube ip)"
+BASE_URL="http://${MINIKUBE_IP}:${EXPECTED_NODE_PORT}"
+pass "testing Kubernetes frontend-service at ${BASE_URL}"
 
-step "Running API smoke test script against Kubernetes backend"
-BASE_URL=http://localhost:18000 ./scripts/test-api.sh
+step "Running Minikube NodePort smoke checks"
+expect_http_200 "${BASE_URL}/"
+expect_body_contains "${BASE_URL}/api/health" '"status"[[:space:]]*:[[:space:]]*"ok"' "/api/health reports backend ok"
+expect_body_contains "${BASE_URL}/api/health/db" '"database"[[:space:]]*:[[:space:]]*"connected"' "/api/health/db reports database ok"
+expect_body_contains "${BASE_URL}/api/books" '"title"|"author"' "/api/books returns book data"
 
-step "Kubernetes local API tests completed"
+echo
+echo "PASS: Kubernetes Minikube service tests completed successfully"
