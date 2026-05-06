@@ -74,60 +74,69 @@ hey -h
 
 ---
 
-## 4. Quick Start: Updating an Existing Minikube Deployment
+## 4. Updating an Existing Minikube Deployment
 
-This is the primary workflow for repeated code/config changes. Do **not** assume each run starts from a clean cluster: Kubernetes can keep running old Pods and old local images even after files change.
+This is the primary workflow for repeated frontend, backend, or Kubernetes configuration changes. Do **not** only run `kubectl apply` after changing frontend or backend code: Minikube can continue running Pods that use stale local images when the Deployment image tag remains `bookstore-frontend:latest` or `bookstore-backend:latest`.
 
-Main workflow:
+The standardized update command is:
+
+```bash
+./scripts/k8s-rebuild-and-deploy.sh
+```
+
+The script performs the full local-image update workflow:
 
 ```text
-edit code/config
-  -> docker compose build on host Docker
-  -> minikube image load
-  -> verify image inside Minikube
-  -> kubectl apply YAML
-  -> rollout restart deployments
-  -> test NodePort
-  -> expose browser demo
+build backend image
+  -> build frontend image
+  -> load both images into Minikube
+  -> apply Kubernetes manifests and PostgreSQL init ConfigMap/Job logic
+  -> restart backend/frontend Deployments
+  -> wait for rollouts
+  -> print Pods, Services, and verification commands
 ```
 
+It also uses the shared Kubernetes helper so environments without standalone `kubectl` can fall back to `minikube kubectl --`.
 
-
-All Kubernetes commands below use `minikube kubectl --` so they work on servers without standalone `kubectl`.
-
-
+After the update completes, verify the deployment with:
 
 ```bash
-chmod +x scripts/*.sh
+./scripts/k8s-test-local.sh
+./scripts/k8s-status.sh
 ```
 
+If the browser still shows an old frontend or backend version, check that:
 
-### 4.1 Recommended Update Flow
+- the relevant Docker image was rebuilt on the host Docker daemon
+- the rebuilt image was loaded into Minikube with `minikube image load`
+- the frontend and backend Deployments were restarted after the image load
+- Pods were recreated after the restart
+- image tags in `docker-compose.yml`, `k8s/backend-deployment.yaml`, and `k8s/frontend-deployment.yaml` still match the stable local tags used by the project
 
-Run this after frontend/backend/config changes:
+### 4.1 Optional PostgreSQL init rerun
+
+The rebuild/deploy script preserves the `postgres-init-sql` ConfigMap logic and does **not** rerun a completed `postgres-init` Job by default. If SQL changes require the init Job to run again, use:
 
 ```bash
-# 1) Build fresh images on the host Docker daemon.
+FORCE_POSTGRES_INIT=1 ./scripts/k8s-rebuild-and-deploy.sh
+```
+
+> Warning: depending on the SQL in `database/schema.sql` and `database/seed.sql`, rerunning the init Job may reset demo data.
+
+### 4.2 Advanced/manual update steps
+
+Manual commands are useful for debugging, but the script above is the recommended default workflow. If you manually update code images, include **all** of these steps; `kubectl apply` alone is not enough for frontend/backend code changes:
+
+```bash
+# Build fresh stable local image tags on the host Docker daemon.
 eval $(minikube docker-env -u)
 docker compose build backend frontend
 
-# 2) Verify the host frontend image contains the Kubernetes backend proxy.
-docker run --rm bookstore-frontend:latest cat /etc/nginx/conf.d/default.conf
-# Expected line:
-# proxy_pass http://backend-service:8000;
-
-# 3) Load fresh images into Minikube.
+# Load the images that the Kubernetes Deployments reference.
 minikube image load bookstore-backend:latest
 minikube image load bookstore-frontend:latest
 
-# 4) Verify the frontend image inside Minikube too.
-eval $(minikube docker-env)
-docker run --rm bookstore-frontend:latest cat /etc/nginx/conf.d/default.conf
-# Expected line:
-# proxy_pass http://backend-service:8000;
-eval $(minikube docker-env -u)
-
-# 5) Apply YAML. "unchanged" only means the manifest text did not change.
+# Apply manifests. "unchanged" only means manifest text did not change.
 minikube kubectl -- apply -f k8s/namespace.yaml
 minikube kubectl -- apply -f k8s/configmap.yaml
 minikube kubectl -- apply -f k8s/secret.yaml
@@ -140,78 +149,16 @@ minikube kubectl -- apply -f k8s/frontend-deployment.yaml
 minikube kubectl -- apply -f k8s/ingress.yaml
 minikube kubectl -- apply -f k8s/hpa.yaml
 
-# 6) Force Pods to restart so they use the newly loaded local images.
+# Restart Pods so the stable local tags resolve to the newly loaded images.
 minikube kubectl -- rollout restart deployment/backend -n bookstore
 minikube kubectl -- rollout restart deployment/frontend -n bookstore
-minikube kubectl -- rollout status deployment/backend -n bookstore --timeout=180s
-minikube kubectl -- rollout status deployment/frontend -n bookstore --timeout=180s
-
-# 7) Test through the Kubernetes NodePort, not Docker Compose localhost ports.
-MINIKUBE_IP=$(minikube ip)
-curl "http://${MINIKUBE_IP}:30080"
-curl "http://${MINIKUBE_IP}:30080/api/health"
-curl "http://${MINIKUBE_IP}:30080/api/health/db"
-curl "http://${MINIKUBE_IP}:30080/api/books"
+minikube kubectl -- rollout status deployment/backend -n bookstore --timeout=240s
+minikube kubectl -- rollout status deployment/frontend -n bookstore --timeout=240s
 ```
 
-```bash
-#check pods
-kubectl get pods -n bookstore -o wide
-kubectl get all -n bookstore
-```
+Manual `kubectl apply` without rebuilding/loading/restarting is appropriate only for configuration-only changes such as ConfigMap, Ingress, or HPA edits that do not change frontend/backend container contents.
 
-Important: `minikube kubectl -- apply ...` returning `unchanged` does **not** mean running Pods are using your new image. If the Deployment spec still says `bookstore-frontend:latest` or `bookstore-backend:latest`, Kubernetes may keep existing Pods. Always reload images into Minikube and run `rollout restart` for repeated local-image development.
-
-Shortcut when you want the helper script to do the rebuild/load/apply/restart path:
-
-```bash
-./scripts/k8s-rebuild-and-deploy.sh
-./scripts/k8s-test-local.sh
-```
-
-### 4.2 Delete Stale Minikube Images Before Reloading
-
-If Minikube keeps serving an old frontend, remove the stale image from Minikube first, then load the host image again:
-
-```bash
-eval $(minikube docker-env)
-docker rmi bookstore-frontend:latest || true
-eval $(minikube docker-env -u)
-minikube image load bookstore-frontend:latest
-
-minikube kubectl -- rollout restart deployment/frontend -n bookstore
-minikube kubectl -- rollout status deployment/frontend -n bookstore --timeout=180s
-```
-
-Re-check the image contents inside Minikube:
-
-```bash
-eval $(minikube docker-env)
-docker run --rm bookstore-frontend:latest cat /etc/nginx/conf.d/default.conf
-# Expected line:
-# proxy_pass http://backend-service:8000;
-eval $(minikube docker-env -u)
-```
-
-### 4.3 SQL Changes
-
-PostgreSQL SQL files are mounted into the `postgres-init-sql` ConfigMap and executed by the `postgres-init` Job. After editing `database/schema.sql` or `database/seed.sql`, recreate the ConfigMap and rerun the Job:
-
-```bash
-minikube kubectl -- create configmap postgres-init-sql \
-  --from-file=01-schema.sql=database/schema.sql \
-  --from-file=02-seed.sql=database/seed.sql \
-  -n bookstore --dry-run=client -o yaml | minikube kubectl -- apply -f -
-
-minikube kubectl -- delete job postgres-init -n bookstore --ignore-not-found
-minikube kubectl -- apply -f k8s/postgres-init-job.yaml
-minikube kubectl -- wait --for=condition=complete job/postgres-init -n bookstore --timeout=180s
-minikube kubectl -- logs job/postgres-init -n bookstore
-```
-
-Depending on SQL logic, rerunning the init Job may reset demo data.
-
-### 4.4 Test the NodePort
+### 4.3 Test the NodePort
 
 `frontend-service` is a NodePort service on port `30080`.
 
@@ -222,9 +169,9 @@ curl "http://${MINIKUBE_IP}:30080/api/health"
 curl "http://${MINIKUBE_IP}:30080/api/books"
 ```
 
-### 4.5 Expose Browser Demo
+### 4.4 Expose Browser Demo
 
-`frontend-service` is exposed inside Kubernetes as a NodePort on `30080`. In this Minikube-on-cloud-server setup, `$(minikube ip)` is an internal Minikube address, so public browser access needs host-level forwarding from public host port `3000` to `$(minikube ip):30080`.
+`frontend-service` is exposed inside Kubernetes as a NodePort on `30080`. In this Minikube-on-cloud-server setup, `$(minikube ip)` is an internal Minikube address, so public browser access should continue to use the existing iptables-based expose script from public host port `3000` to `$(minikube ip):30080` when needed.
 
 ```bash
 PUBLIC_PORT=3000 ./scripts/k8s-expose-demo.sh
@@ -278,14 +225,6 @@ To remove the demo forwarding rules, run cleanup with the same ports:
 PUBLIC_PORT=3000 NODE_PORT=30080 ./scripts/k8s-expose-demo.sh --cleanup
 ```
 
-The verified iptables DNAT method is the main scripted method. `socat` can remain a simple fallback/debugging method, but do not run `socat` and iptables DNAT for the same public port at the same time. Stop `socat` first if you use iptables DNAT:
-
-```bash
-sudo pkill socat
-MINIKUBE_IP=$(minikube ip)
-nohup sudo socat TCP-LISTEN:3000,fork,reuseaddr,bind=0.0.0.0 TCP:${MINIKUBE_IP}:30080 > socat-demo.log 2>&1 &
-```
-
 ## 5. First-Time Deployment
 
 Use this only for a clean cluster or a fresh Minikube profile.
@@ -300,9 +239,14 @@ chmod +x scripts/*.sh
 ./scripts/k8s-test-local.sh
 ```
 
-Manual first-time sequence if you are not using the helper script:
+Manual first-time sequence if you are not using the helper script. Prefer the script above; if you do this manually, still build and load the local images before applying manifests:
 
 ```bash
+eval $(minikube docker-env -u)
+docker compose build backend frontend
+minikube image load bookstore-backend:latest
+minikube image load bookstore-frontend:latest
+
 minikube kubectl -- apply -f k8s/namespace.yaml
 minikube kubectl -- wait --for=jsonpath='{.status.phase}'=Active namespace/bookstore --timeout=60s
 
@@ -324,6 +268,11 @@ minikube kubectl -- apply -f k8s/frontend-service.yaml
 minikube kubectl -- apply -f k8s/frontend-deployment.yaml
 minikube kubectl -- apply -f k8s/ingress.yaml
 minikube kubectl -- apply -f k8s/hpa.yaml
+
+minikube kubectl -- rollout restart deployment/backend -n bookstore
+minikube kubectl -- rollout restart deployment/frontend -n bookstore
+minikube kubectl -- rollout status deployment/backend -n bookstore --timeout=240s
+minikube kubectl -- rollout status deployment/frontend -n bookstore --timeout=240s
 ```
 
 ## 6. Testing and Verification

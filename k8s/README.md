@@ -20,26 +20,31 @@ This folder contains a simple Kubernetes baseline for the DSAA 4040 bookstore sy
 - `bookstore-backend:latest`
 - `bookstore-frontend:latest`
 
-For Minikube image builds:
+The automated workflow builds these stable tags on the host Docker daemon and loads them into Minikube:
+
 ```bash
-eval $(minikube docker-env)
-docker compose build backend frontend
+./scripts/k8s-rebuild-and-deploy.sh
 ```
 
 ## Recommended local Minikube workflow (automated)
-Run from repository root:
+Run from the repository root for both first-time deployment to an already running Minikube profile and repeated update deployments:
+
 ```bash
 ./scripts/k8s-rebuild-and-deploy.sh
 ./scripts/k8s-test-local.sh
 PUBLIC_PORT=3000 ./scripts/k8s-expose-demo.sh
 ```
 
-This workflow is recommended for local rebuild/redeploy because it:
+The rebuild/deploy script is the preferred workflow because it:
+- builds `bookstore-backend:latest` and `bookstore-frontend:latest`, matching the image tags in the Kubernetes Deployments
+- loads both freshly built images into Minikube so the cluster does not keep stale local images
+- applies namespace, ConfigMap, Secret, PostgreSQL, backend, frontend, Service, Ingress, HPA, and init Job manifests in the expected order
+- preserves the generated `postgres-init-sql` ConfigMap logic before running the `postgres-init` Job
+- restarts the backend and frontend Deployments after image loading so Pods use the newly loaded images
+- waits for rollout completion and prints final Pods/Services plus verification commands
 - works when standalone `kubectl` is unavailable by falling back to `minikube kubectl --`
-- tests the Minikube NodePort service instead of Docker Compose localhost ports
-- avoids Docker Hub pull failures inside Minikube by loading `postgres:16` from host Docker cache when available
-- ensures `postgres-init-sql` ConfigMap exists before running `postgres-init` Job
-- avoids manual image tagging/loading mistakes for backend and frontend images
+
+Manual `kubectl apply` is appropriate only for configuration-only changes such as ConfigMap, Ingress, or HPA edits. If frontend or backend code changes, the update must include image rebuild, `minikube image load`, and Deployment restart; prefer `./scripts/k8s-rebuild-and-deploy.sh` instead of doing those steps by hand.
 
 
 ## Public browser demo from a cloud-hosted Minikube node
@@ -68,10 +73,14 @@ PUBLIC_PORT=3000 NODE_PORT=30080 ./scripts/k8s-expose-demo.sh --cleanup
 
 This is a single-node Minikube demo method. Production Kubernetes should normally use a cloud `LoadBalancer` Service or an Ingress controller backed by a public load balancer.
 
-## Apply manifests
+## Apply manifests manually for configuration-only changes
+Manual apply can be useful for configuration-only changes that do not alter frontend/backend image contents, such as ConfigMap, Ingress, or HPA changes:
+
 ```bash
 minikube kubectl -- apply -f k8s/
 ```
+
+For frontend or backend code changes, prefer `./scripts/k8s-rebuild-and-deploy.sh` so images are rebuilt, loaded into Minikube, and Deployments are restarted.
 
 ## Inspect resources
 ```bash
