@@ -106,12 +106,52 @@ Add `"<minikube-ip> bookstore.local"` to `/etc/hosts` (or Windows hosts file).
 - http://bookstore.local/api/health
 - http://bookstore.local/api/books
 
-## Check HPA
+## HPA metrics-server repair and autoscaling demo
+Kubernetes HPA requires the Metrics API from `metrics-server` to calculate CPU utilization. If `backend-hpa` shows `cpu: <unknown>/50%`, run the repeatable repair/check workflow from the repository root:
+
 ```bash
-minikube addons enable metrics-server
-minikube kubectl -- get hpa -n bookstore
-minikube kubectl -- top pods -n bookstore
+./scripts/k8s-fix-metrics-server.sh
 ```
+
+The script enables the Minikube addon, waits for the metrics-server Deployment/Pod, detects `ImagePullBackOff` or `ErrImagePull`, and patches metrics-server away from the bad tag+digest image form to a valid tag-only image when needed. It then restarts metrics-server, waits for rollout, verifies:
+
+```bash
+minikube kubectl -- top nodes
+minikube kubectl -- top pods -n bookstore
+minikube kubectl -- get hpa -n bookstore
+```
+
+Run the HPA load demo with:
+
+```bash
+./scripts/k8s-hpa-demo.sh
+```
+
+Optional custom load example:
+
+```bash
+DURATION=240s CONCURRENCY=30 ./scripts/k8s-hpa-demo.sh
+```
+
+Expected behavior:
+
+- Before load: backend has 2 replicas, CPU is low, and HPA shows a known value such as `cpu: 3%/50%`.
+- During load: CPU rises above the 50% target and backend scales from 2 replicas to 3, 4, or 5 replicas.
+- After load: backend eventually scales back down to 2 replicas; scale-down may take several minutes because HPA uses stabilization behavior.
+
+HPA CPU percentages are relative to container CPU requests, not total node CPU. For example, if backend requests `100m` CPU and uses `300m` CPU, HPA can report about `300%`.
+
+Screenshot/evidence checklist for the report:
+
+- HPA before load
+- pod CPU before load
+- `hey` load generator output
+- HPA during load
+- backend Deployment scaling from 2 to more replicas
+- backend Pods being created (`Pending -> ContainerCreating -> Running -> Ready`)
+- pod CPU during load
+- `kubectl describe hpa backend-hpa -n bookstore` output
+- scale-down evidence if captured
 
 ## PostgreSQL initialization Job
 Create a ConfigMap that mounts SQL files into the Job container:
