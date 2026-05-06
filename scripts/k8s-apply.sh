@@ -17,6 +17,7 @@ echo "Using Kubernetes command: ${KUBECTL_MODE}"
 "${KUBECTL[@]}" apply -f k8s/secret.yaml
 "${KUBECTL[@]}" apply -f k8s/postgres-deployment.yaml
 "${KUBECTL[@]}" apply -f k8s/postgres-service.yaml
+"${KUBECTL[@]}" apply -f k8s/backend-rbac.yaml
 "${KUBECTL[@]}" apply -f k8s/backend-service.yaml
 "${KUBECTL[@]}" apply -f k8s/backend-deployment.yaml
 "${KUBECTL[@]}" apply -f k8s/frontend-service.yaml

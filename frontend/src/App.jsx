@@ -14,6 +14,7 @@ import AdminBooks from "./components/AdminBooks";
 import BookList from "./components/BookList";
 import Cart from "./components/Cart";
 import OrderHistory from "./components/OrderHistory";
+import MonitoringDashboard from "./components/MonitoringDashboard";
 import StatusMessage from "./components/StatusMessage";
 
 function App() {
@@ -134,6 +135,14 @@ function App() {
     }
   };
 
+  if (page === "monitoring") {
+    return (
+      <div className="app">
+        <MonitoringDashboard onBack={() => setPage("store")} />
+      </div>
+    );
+  }
+
   if (page === "admin") {
     return (
       <div className="app">
@@ -152,9 +161,14 @@ function App() {
           <h1>DSAA 4040 Online Bookstore</h1>
           <p>Backend status: {backendStatus} | DB status: {dbStatus}</p>
         </div>
-        <button type="button" onClick={() => setPage("admin")}>
-          Admin Demo
-        </button>
+        <div className="header-actions">
+          <button type="button" onClick={() => setPage("monitoring")}>
+            Monitoring
+          </button>
+          <button type="button" onClick={() => setPage("admin")}>
+            Admin Demo
+          </button>
+        </div>
       </header>
 
       <StatusMessage message={message} error={error} />

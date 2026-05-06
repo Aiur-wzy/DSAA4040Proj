@@ -13,6 +13,7 @@ spec:
       labels:
         app: backend
     spec:
+      serviceAccountName: bookstore-backend
       containers:
         - name: backend
           image: bookstore-backend:latest

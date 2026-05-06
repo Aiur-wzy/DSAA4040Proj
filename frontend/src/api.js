@@ -94,3 +94,7 @@ export function deleteBook(bookId) {
     method: "DELETE"
   });
 }
+
+export function getClusterStatus() {
+  return request("/api/admin/cluster/status");
+}

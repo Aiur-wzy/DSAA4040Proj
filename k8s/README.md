@@ -196,3 +196,61 @@ minikube kubectl -- exec -it -n bookstore deploy/postgres -- \
 - [ ] HPA created
 - [ ] health probes work
 - [ ] PostgreSQL init Job executed and verified at runtime
+
+## In-app Monitoring / HPA Dashboard
+The application includes a lightweight, read-only Monitoring page that supports the HPA autoscaling demo without Prometheus, Grafana, another microservice, or any monitoring database. The flow is:
+
+```text
+React frontend -> FastAPI backend -> Kubernetes API inside the cluster
+```
+
+The FastAPI backend exposes `GET /api/admin/cluster/status` for the React page. That endpoint reads the backend Deployment, `backend-hpa`, backend Pods, and `metrics.k8s.io` Pod metrics when metrics-server is available. The dashboard displays Deployment replica status, HPA CPU/replica status, backend Pods, and simple frontend-only charts for replica and CPU trends. Chart history is stored only in browser memory and resets on page refresh.
+
+The backend Deployment uses the `bookstore-backend` ServiceAccount from `k8s/backend-rbac.yaml`. The RBAC is namespace-scoped and grants read/list/watch access only to Pods, Deployments, HPAs, and Pod metrics needed by the dashboard.
+
+Recommended demo flow:
+
+```bash
+./scripts/k8s-rebuild-and-deploy.sh
+./scripts/k8s-fix-metrics-server.sh
+```
+
+Open the bookstore frontend in a browser and click **Monitoring**. In another terminal run:
+
+```bash
+./scripts/k8s-hpa-demo.sh
+```
+
+Expected behavior:
+- before load: backend has 2 replicas and low CPU
+- during load: CPU rises above the 50% HPA target
+- backend replicas increase toward `maxReplicas=5`
+- new backend Pods appear in the table
+- the replicas chart rises from 2 toward 5
+- the CPU chart rises above the target line
+- after load stops: CPU decreases, and after the HPA scale-down delay replicas eventually return to 2
+
+Metrics-server is required for CPU and memory values. If metrics are unavailable, run:
+
+```bash
+./scripts/k8s-fix-metrics-server.sh
+```
+
+Then verify metrics with:
+
+```bash
+minikube kubectl -- top pods -n bookstore
+```
+
+This dashboard is read-only. It does not scale Deployments, patch the HPA, delete Pods, run load tests, or modify Kubernetes resources.
+
+Screenshot/evidence checklist for the final report:
+- Monitoring page before load
+- HPA card before load
+- replicas chart before load
+- load generator terminal
+- Monitoring page during load
+- replicas chart showing 2 -> 5
+- CPU chart showing utilization rising above target
+- backend Pods table showing new Pods
+- Monitoring page after load showing scale-down if captured
