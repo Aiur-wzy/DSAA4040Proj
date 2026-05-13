@@ -1,921 +1,258 @@
-Phase 1: Database foundation
-    schema.sql
-    seed.sql
-    transaction SQL
+# TODO / Verification Plan
 
-Phase 2: Backend API
-    FastAPI
-    database connection
-    books/cart/orders API
+This checklist replaces the old early-stage TODO and is aligned with the project proposal in
+`DSAD4040_Proj_Proposal.pdf` plus the current repository implementation.
 
-Phase 3: Frontend
-    React page
-    book list
-    cart
-    order button
+Status labels:
 
-Phase 4: Local integration
-    Dockerfile
-    Docker Compose
-    db + backend + frontend
+- `[x]` Completed / implemented in the repository.
+- `[~]` Needs runtime verification or final demo evidence.
+- `[ ]` Pending implementation work.
+- `[!]` Known limitation / future work.
 
-Phase 5: Kubernetes deployment
-    Deployment
-    Service
-    ConfigMap
-    Secret
-    Ingress
+## Proposal Alignment Summary
 
-Phase 6: Cloud-native features
-    health checks
-    HPA
-    metrics-server
-    monitoring commands
-    load testing
+The proposal requires a cloud-native online bookstore with a frontend, backend API, and
+relational database; book browsing/search; shopping cart management; order placement with
+persistent data and correctness; containerization; Kubernetes Deployment/Service,
+ConfigMap, Secret, Ingress, autoscaling, health checks, basic monitoring, and lightweight
+performance testing; plus README/report/demo deliverables.
 
-Phase 7: Report and demo
-    architecture diagram
-    deployment screenshots
-    HPA experiment
-    performance table
+Repository status at this update:
 
+- [x] Three-tier bookstore architecture is implemented.
+  Evidence: `frontend/`, `backend/app/`, `database/`, `docker-compose.yml`, and `k8s/`.
+- [x] Kubernetes backend has evolved from one backend Deployment into split public, admin,
+  and monitoring Deployments/Services.
+  Evidence: `k8s/public-backend-deployment.yaml`, `k8s/admin-backend-deployment.yaml`,
+  `k8s/monitoring-backend-deployment.yaml`, and matching Service manifests.
+- [x] HPA now targets `Deployment/public-backend` through `public-backend-hpa`.
+  Evidence: `k8s/hpa.yaml`.
+- [x] Kubernetes monitoring access is isolated to `monitoring-backend` through dedicated
+  read-only RBAC.
+  Evidence: `k8s/monitoring-backend-rbac.yaml`.
+- [~] Final report/demo evidence still needs to be captured from a live Minikube run.
+  Verify with the commands in [Final Runtime Verification](#final-runtime-verification).
 
-## TODO / Verification Plan
+## Core Bookstore Functionality
 
-The database foundation has been implemented but has not yet been executed against a live PostgreSQL instance.
+- [x] Book browsing and search are implemented.
+  Evidence: `backend/app/routes/books.py`, `frontend/src/components/BookList.jsx`.
+  Verify with: `BASE_URL=http://$(minikube ip):30080 ./scripts/test-api.sh`.
+- [x] Shopping cart add/update/delete/view flow is implemented.
+  Evidence: `backend/app/routes/cart.py`, `frontend/src/components/Cart.jsx`.
+  Verify with: `BASE_URL=http://$(minikube ip):30080 ./scripts/test-api.sh`.
+- [x] Order placement and order history are implemented.
+  Evidence: `backend/app/routes/orders.py`, `frontend/src/components/OrderHistory.jsx`.
+  Verify with: `BASE_URL=http://$(minikube ip):30080 ./scripts/test-api.sh`.
+- [!] This is a course-demo bookstore, not a production commerce system.
+  Future work: real authentication, user accounts, payment, tax, shipping, email, and fraud
+  workflows.
 
-Pending verification:
+## Database Design and Transaction Correctness
 
-- [ ] Start PostgreSQL with Docker
-- [ ] Run `database/schema.sql`
-- [ ] Run `database/seed.sql`
-- [ ] Run `database/test.sql`
-- [ ] Run `database/place_order.sql`
-- [ ] Verify that:
-  - [ ] `books` contains initial seed data
-  - [ ] `carts` supports upsert behavior
-  - [ ] `orders` can be created
-  - [ ] `order_items` stores order details
-  - [ ] stock is decremented after order placement
-  - [ ] cart is cleared after order placement
+- [x] PostgreSQL schema and constraints are implemented.
+  Evidence: `database/schema.sql`.
+- [x] Seed data is implemented.
+  Evidence: `database/seed.sql`.
+- [x] SQL transaction demo for order placement exists.
+  Evidence: `database/place_order.sql`.
+- [x] Kubernetes database initialization is implemented as an init Job, not a manual primary
+  setup path.
+  Evidence: `k8s/postgres-init-job.yaml`.
+- [x] Docker Compose initializes schema and seed automatically through PostgreSQL
+  entrypoint mounts.
+  Evidence: `docker-compose.yml`.
+- [~] Live transaction behavior should be verified before the final demo.
+  Verify with: `./scripts/test-api.sh` after starting Docker Compose or Kubernetes.
 
+## Backend API
 
-## Backend Runtime Verification TODO
+- [x] FastAPI application is implemented with route registration controlled by
+  `BACKEND_MODE`.
+  Evidence: `backend/app/main.py`.
+- [x] Public APIs are implemented for health, books, cart, and orders.
+  Evidence: `backend/app/routes/health.py`, `backend/app/routes/books.py`,
+  `backend/app/routes/cart.py`, `backend/app/routes/orders.py`.
+- [x] Admin catalog APIs are implemented.
+  Evidence: `backend/app/routes/admin_books.py`.
+  Verify with: `BASE_URL=http://$(minikube ip):30080 ./scripts/test-admin-api.sh`.
+- [x] Kubernetes status API exists at `GET /api/admin/cluster/status`.
+  Evidence: `backend/app/routes/cluster_status.py`.
+  Verify with: `curl -s http://$(minikube ip):30080/api/admin/cluster/status | python3 -m json.tool`.
+- [!] Admin APIs are intentionally unauthenticated for the demo.
+  Future work: production authentication, authorization, audit logs, and stricter admin RBAC.
 
-### Environment and startup
+## Frontend UI
 
-- [ ] Create Python virtual environment under `backend/`
-- [ ] Install `backend/requirements.txt`
-- [ ] Start FastAPI with `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
-- [ ] Open Swagger UI at `http://localhost:8000/docs`
+- [x] React/Vite storefront is implemented.
+  Evidence: `frontend/src/App.jsx`, `frontend/src/components/BookList.jsx`,
+  `frontend/src/components/Cart.jsx`, `frontend/src/components/OrderHistory.jsx`.
+- [x] Admin Demo page is implemented.
+  Evidence: `frontend/src/components/AdminBooks.jsx`.
+- [x] Monitoring Dashboard page is implemented.
+  Evidence: `frontend/src/components/MonitoringDashboard.jsx`.
+- [x] Frontend Nginx mirrors Kubernetes route splitting for NodePort/public demo paths.
+  Evidence: `frontend/nginx.conf`.
+- [~] Final browser screenshots should be captured for Store, Admin Demo, Monitoring
+  Dashboard, and public demo exposure.
 
-### Health endpoints
+## Docker and Docker Compose
 
-- [ ] `GET /api/health` returns service status without requiring PostgreSQL
-- [ ] `GET /api/health/db` returns 503 when PostgreSQL is unavailable
-- [ ] `GET /api/health/db` returns database connected when PostgreSQL is running
+- [x] Backend Dockerfile is implemented.
+  Evidence: `backend/Dockerfile`.
+- [x] Frontend Dockerfile is implemented.
+  Evidence: `frontend/Dockerfile`.
+- [x] Docker Compose workflow is implemented for `db`, `backend`, and `frontend`.
+  Evidence: `docker-compose.yml`, `scripts/compose-up.sh`, `scripts/compose-down.sh`,
+  `scripts/compose-status.sh`, `scripts/compose-logs.sh`.
+- [~] Compose should be smoke-tested before submission if the local environment has Docker.
+  Verify with: `./scripts/compose-up.sh`, then `./scripts/test-api.sh` and
+  `BASE_URL=http://localhost:8000 ./scripts/test-admin-api.sh`.
 
-### Database setup
+## Kubernetes Deployment
 
-- [ ] Start PostgreSQL using Docker
-- [ ] Run `database/schema.sql`
-- [ ] Run `database/seed.sql`
-- [ ] Verify `books`, `carts`, `orders`, and `order_items` exist
-- [ ] Verify 8 seed books are inserted
+- [x] Namespace, PostgreSQL, frontend, and split backend Kubernetes manifests are
+  implemented.
+  Evidence: `k8s/namespace.yaml`, `k8s/postgres-deployment.yaml`,
+  `k8s/frontend-deployment.yaml`, `k8s/public-backend-deployment.yaml`,
+  `k8s/admin-backend-deployment.yaml`, `k8s/monitoring-backend-deployment.yaml`.
+- [x] Public backend Service is implemented.
+  Evidence: `k8s/public-backend-service.yaml`.
+- [x] Admin backend Service is implemented.
+  Evidence: `k8s/admin-backend-service.yaml`.
+- [x] Monitoring backend Service is implemented.
+  Evidence: `k8s/monitoring-backend-service.yaml`.
+- [x] Frontend NodePort Service is implemented for local/demo access.
+  Evidence: `k8s/frontend-service.yaml`.
+- [~] Final Kubernetes runtime state should be captured.
+  Verify with: `kubectl get deploy,svc,hpa,ingress -n bookstore`.
 
-### Books API
+## ConfigMap, Secret, and Persistent Storage
 
-- [ ] `GET /api/books` returns all seed books
-- [ ] `GET /api/books?search=database` returns matching books
-- [ ] `GET /api/books?search=notexist` returns an empty list
+- [x] Non-secret configuration is stored in a ConfigMap.
+  Evidence: `k8s/configmap.yaml`.
+- [x] Demo database credentials are stored in a Kubernetes Secret.
+  Evidence: `k8s/secret.yaml`.
+- [x] PostgreSQL persistent storage is implemented with a PVC.
+  Evidence: `k8s/postgres-deployment.yaml`.
+- [!] Secret usage is demo-level only.
+  Future work: external secret management, rotation, environment-specific credentials, and
+  sealed/encrypted secret workflows.
 
-### Cart API
+## Ingress Routing and Public Demo Exposure
 
-- [ ] `GET /api/cart` returns an empty cart initially
-- [ ] `POST /api/cart` adds a new book
-- [ ] Repeated `POST /api/cart` increments quantity using upsert
-- [ ] `POST /api/cart` with nonexistent `book_id` returns 404
-- [ ] `POST /api/cart` with invalid quantity returns validation error
-- [ ] `PUT /api/cart/{book_id}` updates quantity
-- [ ] `PUT /api/cart/{book_id}` for missing cart item returns 404
-- [ ] `DELETE /api/cart/{book_id}` removes item
-- [ ] `DELETE /api/cart/{book_id}` for missing cart item returns 404
+- [x] Kubernetes Ingress path routing is implemented:
+  - `/api/admin/cluster` -> `monitoring-backend-service`
+  - `/api/admin` -> `admin-backend-service`
+  - `/api` -> `public-backend-service`
+  - `/` -> `frontend-service`
+  Evidence: `k8s/ingress.yaml`.
+- [x] Ingress repair/check script is implemented.
+  Evidence: `scripts/k8s-fix-ingress.sh`.
+- [x] Public demo exposure script is implemented.
+  Evidence: `scripts/k8s-expose-demo.sh`.
+- [~] Ingress and public demo routes need live evidence.
+  Verify with the Ingress and public exposure commands below.
+- [!] Public iptables/port exposure is demo-only.
+  Future work: cloud LoadBalancer, TLS, DNS, and production ingress hardening.
 
-### Orders API
+## HPA Autoscaling and Metrics Server
 
-- [ ] `POST /api/orders` with empty cart returns 400
-- [ ] `POST /api/orders` with valid cart creates one order
-- [ ] Valid order placement creates corresponding `order_items`
-- [ ] Valid order placement decrements `books.stock`
-- [ ] Valid order placement clears `carts`
-- [ ] `GET /api/orders` returns order history with item details
-- [ ] Insufficient stock during order placement returns 409
-- [ ] Insufficient stock does not create partial order data
-- [ ] Insufficient stock does not decrement stock
-- [ ] Insufficient stock does not clear cart
+- [x] HPA is implemented for `public-backend` with min/max replicas.
+  Evidence: `k8s/hpa.yaml`.
+- [x] metrics-server repair/check script exists.
+  Evidence: `scripts/k8s-fix-metrics-server.sh`.
+- [x] Repeatable HPA demo script exists.
+  Evidence: `scripts/k8s-hpa-demo.sh`.
+- [~] HPA before/under-load/after-load evidence still needs to be captured from a live
+  Minikube run.
+  Verify with: `./scripts/k8s-hpa-demo.sh`.
+- [~] metrics-server working evidence still needs to be captured.
+  Verify with: `./scripts/k8s-fix-metrics-server.sh` and `kubectl top pods -n bookstore`.
 
-### Dockerfile
+## Monitoring Dashboard and Admin Demo
 
-- [ ] `docker build -t bookstore-backend:latest ./backend` succeeds
-- [ ] Backend container starts successfully
-- [ ] Containerized backend can connect to PostgreSQL in later Docker Compose setup
+- [x] Monitoring backend exposes public-backend Deployment, HPA, Pod, and metrics status.
+  Evidence: `backend/app/routes/cluster_status.py`.
+- [x] Monitoring backend uses a dedicated read-only ServiceAccount/Role/RoleBinding.
+  Evidence: `k8s/monitoring-backend-rbac.yaml`.
+- [x] Monitoring Dashboard is implemented in the frontend.
+  Evidence: `frontend/src/components/MonitoringDashboard.jsx`.
+- [x] Admin Demo frontend and backend routes are implemented.
+  Evidence: `frontend/src/components/AdminBooks.jsx`, `backend/app/routes/admin_books.py`.
+- [!] Monitoring Dashboard is lightweight and frontend-history based, not a Prometheus or
+  Grafana deployment.
+  Future work: Prometheus, Grafana, alerting, persistent metrics, and SLO dashboards.
 
+## Testing, Verification, and Documentation
 
+- [x] API smoke test script is implemented.
+  Evidence: `scripts/test-api.sh`.
+- [x] Admin API smoke test script is implemented.
+  Evidence: `scripts/test-admin-api.sh`.
+- [x] Kubernetes full update script is implemented.
+  Evidence: `scripts/k8s-full-update.sh`.
+- [x] Kubernetes status/test helper scripts are implemented.
+  Evidence: `scripts/k8s-status.sh`, `scripts/k8s-test-local.sh`, `scripts/monitor-k8s.sh`.
+- [x] Demo and architecture documentation exists.
+  Evidence: `README.md`, `k8s/README.md`, `docs/demo_manual.md`,
+  `docs/architecture_and_defense_notes.md`.
+- [~] Final report evidence should be copied into `report/final_report.md` before
+  submission.
 
-## Frontend Runtime Verification TODO
+## Final Runtime Verification
 
-- [ ] Run `cd frontend && npm install`
-- [ ] Run `npm run build`
-- [ ] Run `npm run dev`
-- [ ] Open `http://localhost:5173`
-- [ ] Verify frontend loads without JavaScript errors
-- [ ] Verify `/api` calls use `VITE_API_BASE_URL`
-- [ ] Verify book list renders when backend is running
-- [ ] Verify search works
-- [ ] Verify add-to-cart works
-- [ ] Verify cart update works
-- [ ] Verify cart delete works
-- [ ] Verify place-order works
-- [ ] Verify order history renders
-- [ ] Verify DB health failure displays warning but does not crash UI
-- [ ] Build frontend Docker image
-- [ ] Verify Nginx SPA fallback works
-- [ ] Verify Nginx `/api` proxy works in Docker Compose
-
-
-
-## Docker Compose Runtime Verification TODO
-
-### 1. Docker environment
-
-- [ ] Verify Docker is installed locally
-- [ ] Verify Docker Compose is available
-
-```bash
-docker --version
-docker compose version
-````
-
-### 2. Compose configuration validation
-
-* [ ] Validate the Compose file syntax
-
-```bash
-docker compose config
-```
-
-Expected result:
-
-* No YAML syntax errors
-* Exactly three services are listed:
-
-  * `db`
-  * `backend`
-  * `frontend`
-* One named volume is listed:
-
-  * `postgres-data`
-
-### 3. Build all services
-
-* [ ] Build all Compose services
-
-```bash
-docker compose build
-```
-
-Expected result:
-
-* PostgreSQL image can be pulled
-* Backend image builds successfully from `./backend`
-* Frontend image builds successfully from `./frontend`
-* `npm install` / frontend build succeeds inside the frontend Docker build
-* Python dependencies install successfully inside the backend Docker build
-
-### 4. Start the full stack
-
-* [ ] Start all services
-
-```bash
-docker compose up --build
-```
-
-Expected result:
-
-* `bookstore-db` starts successfully
-* PostgreSQL healthcheck passes
-* `bookstore-backend` starts after database becomes healthy
-* `bookstore-frontend` starts successfully
-* No container exits unexpectedly
-
-### 5. Check running containers
-
-* [ ] Verify all containers are running
+Run these commands from the repository root when Minikube is available. Do not run the heavy
+Kubernetes scripts during simple documentation edits unless a live cluster is intentionally
+being tested.
 
 ```bash
-docker compose ps
+./scripts/k8s-full-update.sh
+
+BASE_URL=http://$(minikube ip):30080 ./scripts/test-api.sh
+
+BASE_URL=http://$(minikube ip):30080 ./scripts/test-admin-api.sh
+
+curl -s http://$(minikube ip):30080/api/admin/cluster/status | python3 -m json.tool
+
+./scripts/k8s-fix-metrics-server.sh
+
+./scripts/k8s-fix-ingress.sh
+
+./scripts/k8s-hpa-demo.sh
+
+PUBLIC_PORT=3000 NODE_PORT=30080 ./scripts/k8s-expose-demo.sh
+
+curl -i -H "Host: bookstore.local" http://$(minikube ip)/
+curl -i -H "Host: bookstore.local" http://$(minikube ip)/api/books
+curl -i -H "Host: bookstore.local" http://$(minikube ip)/api/admin/cluster/status
 ```
 
-Expected result:
-
-* `bookstore-db` is running and healthy
-* `bookstore-backend` is running
-* `bookstore-frontend` is running
-
-### 6. Verify database initialization
-
-* [ ] Connect to PostgreSQL container
-
-```bash
-docker exec -it bookstore-db psql -U bookstore -d bookstore
-```
-
-Inside psql:
-
-```sql
-\dt
-SELECT COUNT(*) FROM books;
-SELECT * FROM books;
-```
-
-Expected result:
-
-* Tables exist:
-
-  * `books`
-  * `carts`
-  * `orders`
-  * `order_items`
-* `books` contains 8 seed records
-
-### 7. Verify backend API through direct backend port
-
-* [ ] Backend health endpoint works
-
-```bash
-curl http://localhost:8000/api/health
-```
-
-* [ ] Backend database health endpoint works
-
-```bash
-curl http://localhost:8000/api/health/db
-```
-
-* [ ] Backend books API works
-
-```bash
-curl http://localhost:8000/api/books
-```
-
-Expected result:
-
-* `/api/health` returns service OK
-* `/api/health/db` returns database connected
-* `/api/books` returns seeded books
-
-### 8. Verify frontend page
-
-* [ ] Open frontend in browser
-
-```text
-http://localhost:8080
-```
-
-Expected result:
-
-* React page loads successfully
-* No blank page
-* No obvious JavaScript errors in browser console
-* Backend/DB status is displayed
-* Book list is displayed
-
-### 9. Verify Nginx frontend-to-backend proxy
-
-* [ ] Test backend through frontend Nginx proxy
-
-```bash
-curl http://localhost:8080/api/health
-curl http://localhost:8080/api/books
-```
-
-Expected result:
-
-* Requests to `localhost:8080/api/...` are proxied to backend
-* `/api/health` returns backend health
-* `/api/books` returns seeded books
-
-### 10. End-to-end business flow through frontend
-
-* [ ] Search for a book
-* [ ] Add a book to cart
-* [ ] Add the same book again and verify quantity increases
-* [ ] Update cart item quantity
-* [ ] Remove cart item
-* [ ] Add multiple books to cart
-* [ ] Place an order
-* [ ] Verify cart becomes empty after order placement
-* [ ] Verify order history displays the new order
-* [ ] Verify book stock decreases after order placement
-
-### 11. Verify database state after frontend order placement
-
-After placing an order from the frontend:
-
-```bash
-docker exec -it bookstore-db psql -U bookstore -d bookstore
-```
-
-Inside psql:
-
-```sql
-SELECT * FROM orders;
-SELECT * FROM order_items;
-SELECT * FROM carts;
-SELECT id, title, stock FROM books ORDER BY id;
-```
-
-Expected result:
-
-* `orders` contains the created order
-* `order_items` contains order line items
-* `carts` is empty for `demo-user`
-* `books.stock` decreased correctly
-
-### 12. Reset database behavior
-
-* [ ] Stop services without deleting data
-
-```bash
-docker compose down
-```
-
-* [ ] Start again
-
-```bash
-docker compose up --build
-```
-
-Expected result:
-
-* Existing PostgreSQL data is preserved
-
-* [ ] Reset database by deleting volume
-
-```bash
-docker compose down -v
-docker compose up --build
-```
-
-Expected result:
-
-* PostgreSQL data volume is recreated
-* `schema.sql` runs again
-* `seed.sql` runs again
-* Database returns to initial state with 8 books and empty carts/orders/order_items
-
-### 13. Helper scripts
-
-* [ ] Verify compose-up script works
-
-```bash
-./scripts/compose-up.sh
-```
-
-* [ ] Verify compose-down script works
-
-```bash
-./scripts/compose-down.sh
-```
-
-* [ ] Verify reset-db script works
-
-```bash
-./scripts/reset-db.sh
-```
-
-Expected result:
-
-* Scripts run the intended Docker Compose commands
-* `reset-db.sh` clearly warns before deleting the database volume
-
-### 14. Error and recovery checks
-
-* [ ] Stop database container and observe backend DB health
-
-```bash
-docker compose stop db
-curl -i http://localhost:8000/api/health/db
-```
-
-Expected result:
-
-* `/api/health/db` returns an error or unavailable status
-
-* [ ] Restart database
-
-```bash
-docker compose start db
-```
-
-Expected result:
-
-* Database becomes healthy again
-* Backend can reconnect or works after restart
-
-### 15. Documentation consistency
-
-* [ ] Verify README Docker Compose commands are correct
-* [ ] Verify useful URLs in README work:
-
-  * `http://localhost:8080`
-  * `http://localhost:8000/api/health`
-  * `http://localhost:8000/api/health/db`
-  * `http://localhost:8000/api/books`
-  * `http://localhost:8080/api/health`
-* [ ] Verify README explains that `/docker-entrypoint-initdb.d/` scripts only run when PostgreSQL volume is first created
-* [ ] Verify README explains when to use `docker compose down -v`
-
-
-
-## Kubernetes Runtime Verification TODO
-
-### 1. Local Kubernetes environment
-
-- [ ] Verify Minikube is installed
-
-```bash
-minikube version
-````
-
-* [ ] Verify kubectl is installed
-
-```bash
-kubectl version --client
-```
-
-* [ ] Start Minikube
-
-```bash
-minikube start
-```
-
-* [ ] Verify cluster is available
-
-```bash
-kubectl cluster-info
-kubectl get nodes
-```
-
-Expected result:
-
-* Minikube starts successfully
-* At least one Kubernetes node is Ready
-
----
-
-### 2. Build local images for Kubernetes
-
-For Minikube, build images inside Minikube's Docker environment:
-
-```bash
-eval $(minikube docker-env)
-docker build -t bookstore-backend:latest ./backend
-docker build -t bookstore-frontend:latest ./frontend
-```
-
-* [ ] Backend image builds successfully
-* [ ] Frontend image builds successfully
-* [ ] Images are available inside Minikube
-
-```bash
-docker images | grep bookstore
-```
-
-Expected result:
-
-* `bookstore-backend:latest` exists
-* `bookstore-frontend:latest` exists
-
----
-
-### 3. Apply Kubernetes manifests
-
-* [ ] Apply all manifests
-
-```bash
-kubectl apply -f k8s/
-```
-
-* [ ] Verify namespace exists
-
-```bash
-kubectl get ns bookstore
-```
-
-* [ ] Verify ConfigMap and Secret exist
-
-```bash
-kubectl get configmap -n bookstore
-kubectl get secret -n bookstore
-```
-
-Expected result:
-
-* `bookstore` namespace exists
-* `bookstore-config` exists
-* `bookstore-secret` exists
-
----
-
-### 4. Verify PostgreSQL deployment
-
-* [ ] Verify PostgreSQL pod is created
-
-```bash
-kubectl get pods -n bookstore -l app=postgres
-```
-
-* [ ] Verify PVC is bound
-
-```bash
-kubectl get pvc -n bookstore
-```
-
-* [ ] Inspect PostgreSQL pod if needed
-
-```bash
-kubectl describe pod -n bookstore -l app=postgres
-```
-
-* [ ] Check PostgreSQL logs
-
-```bash
-kubectl logs -n bookstore -l app=postgres
-```
-
-Expected result:
-
-* PostgreSQL pod reaches `Running`
-* PostgreSQL pod becomes `Ready`
-* `postgres-pvc` is `Bound`
-* No repeated crash loop
-
----
-
-### 5. Verify backend deployment
-
-* [ ] Verify backend pods are created
-
-```bash
-kubectl get pods -n bookstore -l app=backend
-```
-
-* [ ] Verify backend Deployment status
-
-```bash
-kubectl get deployment backend -n bookstore
-```
-
-* [ ] Check backend logs
-
-```bash
-kubectl logs -n bookstore -l app=backend
-```
-
-Expected result:
-
-* 2 backend pods are created
-* backend pods reach `Running`
-* backend pods become `Ready`
-* backend logs do not show database connection errors after PostgreSQL is ready
-
----
-
-### 6. Verify frontend deployment
-
-* [ ] Verify frontend pods are created
-
-```bash
-kubectl get pods -n bookstore -l app=frontend
-```
-
-* [ ] Verify frontend Deployment status
-
-```bash
-kubectl get deployment frontend -n bookstore
-```
-
-* [ ] Check frontend logs
-
-```bash
-kubectl logs -n bookstore -l app=frontend
-```
-
-Expected result:
-
-* 2 frontend pods are created
-* frontend pods reach `Running`
-* frontend pods become `Ready`
-* Nginx starts successfully
-
----
-
-### 7. Verify Kubernetes Services
-
-* [ ] Verify all Services exist
-
-```bash
-kubectl get svc -n bookstore
-```
-
-Expected result:
-
-* `postgres-service`
-
-* `backend-service`
-
-* `frontend-service`
-
-* [ ] Test backend service by port-forward
-
-```bash
-kubectl port-forward -n bookstore service/backend-service 8000:8000
-```
-
-In another terminal:
-
-```bash
-curl http://localhost:8000/api/health
-curl http://localhost:8000/api/health/db
-```
-
-Expected result:
-
-* `/api/health` returns backend OK
-* `/api/health/db` returns database connected, after DB initialization is handled
-
----
-
-### 8. Database initialization in Kubernetes
-
-Current state: Kubernetes manifests start PostgreSQL, but do not yet automatically execute `schema.sql` and `seed.sql`.
-
-* [ ] Decide database initialization method:
-
-  * manual execution
-  * Kubernetes Job
-  * InitContainer
-  * application startup migration
-
-Recommended for this project: use a simple Kubernetes Job later.
-
-Temporary manual option:
-
-```bash
-kubectl cp database/schema.sql bookstore/<postgres-pod-name>:/tmp/schema.sql
-kubectl cp database/seed.sql bookstore/<postgres-pod-name>:/tmp/seed.sql
-
-kubectl exec -it -n bookstore <postgres-pod-name> -- \
-  psql -U bookstore -d bookstore -f /tmp/schema.sql
-
-kubectl exec -it -n bookstore <postgres-pod-name> -- \
-  psql -U bookstore -d bookstore -f /tmp/seed.sql
-```
-
-Then verify:
-
-```bash
-kubectl exec -it -n bookstore <postgres-pod-name> -- \
-  psql -U bookstore -d bookstore -c "\dt"
-
-kubectl exec -it -n bookstore <postgres-pod-name> -- \
-  psql -U bookstore -d bookstore -c "SELECT COUNT(*) FROM books;"
-```
-
-Expected result:
-
-* Tables are created:
-
-  * `books`
-  * `carts`
-  * `orders`
-  * `order_items`
-* `books` contains 8 seed records
-
----
-
-### 9. Verify backend database connectivity after initialization
-
-* [ ] Test backend DB health again
-
-```bash
-kubectl port-forward -n bookstore service/backend-service 8000:8000
-curl http://localhost:8000/api/health/db
-curl http://localhost:8000/api/books
-```
-
-Expected result:
-
-* DB health returns connected
-* `/api/books` returns seeded books
-
----
-
-### 10. Verify Ingress setup
-
-* [ ] Enable Minikube ingress addon
-
-```bash
-minikube addons enable ingress
-```
-
-* [ ] Verify ingress resource exists
-
-```bash
-kubectl get ingress -n bookstore
-```
-
-* [ ] Get Minikube IP
-
-```bash
-minikube ip
-```
-
-* [ ] Add host mapping
-
-Linux/macOS:
-
-```bash
-sudo sh -c 'echo "<minikube-ip> bookstore.local" >> /etc/hosts'
-```
-
-Windows hosts file:
-
-```text
-C:\Windows\System32\drivers\etc\hosts
-```
-
-Add:
-
-```text
-<minikube-ip> bookstore.local
-```
-
-* [ ] Test ingress routes
-
-```bash
-curl http://bookstore.local/api/health
-curl http://bookstore.local/api/books
-```
-
-* [ ] Open frontend page
-
-```text
-http://bookstore.local
-```
-
-Expected result:
-
-* `/api/health` routes to backend
-* `/api/books` returns seeded books
-* `/` routes to frontend
-* Browser page loads correctly
-
----
-
-### 11. Verify frontend-to-backend flow in Kubernetes
-
-From browser at:
-
-```text
-http://bookstore.local
-```
-
-* [ ] Book list loads
-* [ ] Search works
-* [ ] Add to cart works
-* [ ] Cart quantity update works
-* [ ] Cart item removal works
-* [ ] Place order works
-* [ ] Cart clears after order placement
-* [ ] Order history displays the new order
-* [ ] Stock decreases after order placement
-
----
-
-### 12. Verify health probes
-
-* [ ] Check pod readiness
-
-```bash
-kubectl get pods -n bookstore
-```
-
-* [ ] Describe backend pod
-
-```bash
-kubectl describe pod -n bookstore -l app=backend
-```
-
-* [ ] Describe frontend pod
-
-```bash
-kubectl describe pod -n bookstore -l app=frontend
-```
-
-Expected result:
-
-* readinessProbe succeeds
-* livenessProbe succeeds
-* backend pods are Ready
-* frontend pods are Ready
-
----
-
-### 13. Verify HPA
-
-* [ ] Enable metrics-server
-
-```bash
-minikube addons enable metrics-server
-```
-
-* [ ] Verify metrics are available
-
-```bash
-kubectl top nodes
-kubectl top pods -n bookstore
-```
-
-* [ ] Verify HPA exists
-
-```bash
-kubectl get hpa -n bookstore
-```
-
-Expected result:
-
-* `backend-hpa` exists
-* Current CPU utilization can be read
-* No `<unknown>` metrics after metrics-server becomes ready
-
-Optional load test later:
-
-```bash
-hey -z 2m -c 50 http://bookstore.local/api/books
-```
-
-Then observe:
-
-```bash
-kubectl get hpa -n bookstore -w
-kubectl get pods -n bookstore -w
-```
-
-Expected result:
-
-* backend replicas may scale from 2 toward max 5 under sufficient load
-
----
-
-### 14. Verify cleanup
-
-* [ ] Delete all Kubernetes resources
-
-```bash
-kubectl delete -f k8s/
-```
-
-* [ ] Verify namespace/resources are removed
-
-```bash
-kubectl get ns bookstore
-kubectl get all -n bookstore
-```
-
-Expected result:
-
-* resources are deleted cleanly
-* no unexpected leftover workload resources
-
----
-
-### 15. Documentation consistency
-
-* [ ] Verify `k8s/README.md` commands are correct
-* [ ] Verify image names match manifests:
-
-  * `bookstore-backend:latest`
-  * `bookstore-frontend:latest`
-* [ ] Verify service names match manifests:
-
-  * `postgres-service`
-  * `backend-service`
-  * `frontend-service`
-* [ ] Verify Ingress host is consistently `bookstore.local`
-* [ ] Verify root README says Kubernetes runtime verification is still pending
-
-
-
-
+## Final Screenshot / Evidence Checklist
+
+- [~] Store page screenshot.
+- [~] Admin page screenshot.
+- [~] Monitoring Dashboard screenshot.
+- [~] `kubectl get deploy,svc,hpa,ingress -n bookstore` output.
+- [~] Ingress route `curl` output.
+- [~] HPA before-load, under-load, and after-load output.
+- [~] `public-backend` scaling evidence.
+- [~] metrics-server working evidence.
+- [~] ingress-nginx-controller running evidence.
+- [~] Public browser demo screenshot.
+- [~] API smoke test output.
+
+## Known Limitations / Future Work
+
+- [!] Admin Demo is unauthenticated and intended for controlled course-demo use only.
+- [!] Monitoring Dashboard is lightweight and frontend-history only, not Prometheus/Grafana.
+- [!] The target runtime is a Minikube single-node demo environment, not a multi-node
+  production cluster.
+- [!] Public iptables/port exposure is demo-only and should be replaced with a cloud
+  LoadBalancer or production ingress setup for real deployment.
+- [!] Kubernetes Secret usage is demo-level, not production-grade external secret management.
+- [!] The bookstore does not include real payment, shipping, production auth, or account
+  management.
+- [!] Future improvements: CI/CD, TLS, cloud LoadBalancer, Prometheus/Grafana, production
+  auth/RBAC, NetworkPolicy, backup/restore, and stronger database migration tooling.
