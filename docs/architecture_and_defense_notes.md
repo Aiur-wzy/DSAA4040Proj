@@ -4,7 +4,7 @@ These notes are designed for final presentation preparation and defense question
 
 ## 1. Project overview
 
-The project is a cloud-native online bookstore. Users can browse books, search the catalog, add books to a cart, place orders, and view order history. A demo admin page supports catalog and stock changes. A lightweight in-app Monitoring Dashboard shows Kubernetes backend Deployment, HPA, Pod, and metrics status during the autoscaling demo.
+The project is a cloud-native online bookstore. Users can browse books, search the catalog, add books to a cart, place orders, and view order history. A demo admin page supports catalog and stock changes. A lightweight in-app Monitoring Dashboard shows Kubernetes public-backend Deployment, HPA, Pod, and metrics status during the autoscaling demo.
 
 It is cloud-native because it uses containerized services, declarative Kubernetes manifests, ConfigMaps and Secrets, health probes, a persistent database volume, a PostgreSQL initialization Job, Services, Ingress routing, Horizontal Pod Autoscaling, and automation scripts for repeatable deployment, verification, and demo operations.
 
@@ -14,8 +14,8 @@ The application follows a three-tier architecture:
 
 - **Browser**: user interface entry point.
 - **React/Vite frontend**: bookstore UI, cart, order history, Admin Demo, and Monitoring Dashboard.
-- **Nginx**: serves the built frontend and proxies `/api` requests to the backend.
-- **FastAPI backend**: REST API for health, books, cart, orders, admin book operations, and Kubernetes cluster status.
+- **Nginx**: serves the built frontend and proxies API requests by path to the correct backend Service.
+- **FastAPI backend image**: one `bookstore-backend:latest` image is reused by three Kubernetes Deployments: public, admin, and monitoring.
 - **PostgreSQL database**: persistent catalog, cart, order, and order item data.
 
 ```text
@@ -28,14 +28,14 @@ The application follows a three-tier architecture:
 +-------------------------------+
 | Frontend Pod                  |
 | React/Vite static app + Nginx |
-| /api proxy                    |
+| path-based /api proxy         |
 +----+--------------------------+
      |
      | /api/*
      v
 +----------------+
-| Backend Pod(s) |
-| FastAPI        |
+| Split backend Pods |
+| FastAPI image      |
 +----+-----------+
      |
      | SQL
@@ -46,7 +46,7 @@ The application follows a three-tier architecture:
 +----------------+
 
 Monitoring path:
-React Monitoring page -> FastAPI /api/admin/cluster/status -> Kubernetes API
+React Monitoring page -> monitoring-backend /api/admin/cluster/status -> Kubernetes API
 ```
 
 ## 3. Frontend implementation
@@ -74,7 +74,7 @@ React Monitoring page -> FastAPI /api/admin/cluster/status -> Kubernetes API
 - **Why the frontend does not call the Kubernetes API directly**:
   - browsers should not receive Kubernetes credentials,
   - Kubernetes API access should be controlled server-side,
-  - backend RBAC can restrict exactly what is readable,
+  - monitoring-backend RBAC can restrict exactly what is readable,
   - the backend can normalize Kubernetes client responses into simple JSON for the UI.
 
 ## 4. Backend implementation
@@ -99,7 +99,7 @@ React Monitoring page -> FastAPI /api/admin/cluster/status -> Kubernetes API
   - expected business conflicts use `HTTPException` with `400`, `404`, or `409`,
   - unexpected database errors are returned as `500` with a database error message,
   - health DB failures return `503`.
-- **Why backend is the right place to read Kubernetes API**:
+- **Why monitoring-backend is the right place to read Kubernetes API**:
   - it can use in-cluster ServiceAccount credentials,
   - it can fall back to local kubeconfig for development,
   - RBAC is namespace-scoped and read-only,
@@ -217,13 +217,28 @@ Kubernetes manifests are in `k8s/`.
 | PVC | `k8s/postgres-deployment.yaml` | Persists PostgreSQL data across Pod restarts. |
 | PostgreSQL Service | `k8s/postgres-service.yaml` | Provides stable in-cluster DNS name `postgres-service`. |
 | PostgreSQL init Job | `k8s/postgres-init-job.yaml` | Runs schema and seed SQL after PostgreSQL is ready. |
-| Backend Deployment | `k8s/backend-deployment.yaml` | Runs two FastAPI backend replicas with probes and resource requests/limits. |
-| Backend Service | `k8s/backend-service.yaml` | Provides stable in-cluster backend access on port `8000`. |
+| Public backend Deployment | `k8s/public-backend-deployment.yaml` | Runs two Store/API backend replicas and is the HPA target. |
+| Public/Admin/Monitoring backend Services | `k8s/public-backend-service.yaml`, `k8s/admin-backend-service.yaml`, `k8s/monitoring-backend-service.yaml` | Provide stable in-cluster access for split backend responsibilities on port `8000`. |
 | Frontend Deployment | `k8s/frontend-deployment.yaml` | Runs two Nginx/React frontend replicas with probes. |
 | Frontend Service | `k8s/frontend-service.yaml` | Exposes frontend as NodePort `30080`. |
-| Ingress | `k8s/ingress.yaml` | Optional host-based `bookstore.local` routing for `/` and `/api`. |
-| HPA | `k8s/hpa.yaml` | Autos-scales backend Deployment based on CPU utilization. |
-| RBAC | `k8s/backend-rbac.yaml` | Gives backend read-only access to Pods, Deployments, HPAs, and Pod metrics. |
+| Ingress | `k8s/ingress.yaml` | Optional host-based `bookstore.local` routing for `/api/admin/cluster`, `/api/admin`, `/api`, and `/`. |
+| HPA | `k8s/hpa.yaml` | Autos-scales `Deployment/public-backend` based on CPU utilization. |
+| RBAC | `k8s/monitoring-backend-rbac.yaml` | Gives only monitoring-backend read-only access to Pods, Deployments, HPAs, and Pod metrics. |
+
+
+## Kubernetes backend split
+
+The Kubernetes architecture now separates backend responsibilities without creating multiple backend images:
+
+| Deployment | Service | Responsibility | RBAC |
+| --- | --- | --- | --- |
+| `public-backend` | `public-backend-service` | Store/public APIs (`/api/health`, `/api/books`, `/api/cart`, `/api/orders`) and HPA scaling target | No Kubernetes API permissions |
+| `admin-backend` | `admin-backend-service` | Admin catalog and stock APIs under `/api/admin/books` | No Kubernetes API permissions |
+| `monitoring-backend` | `monitoring-backend-service` | Monitoring API `/api/admin/cluster/status` | Uses `bookstore-monitoring-backend` read-only ServiceAccount |
+
+All three Deployments use `bookstore-backend:latest`, port `8000`, the same ConfigMap/Secret, the same PostgreSQL database, and `/api/health` probes. `BACKEND_MODE` gates route registration in Kubernetes (`public`, `admin`, `monitoring`), while Docker Compose/local dev keeps the default `all` mode.
+
+Ingress and frontend Nginx both route by path: `/api/admin/cluster` to monitoring, `/api/admin` to admin, `/api` to public, and `/` to the React SPA. This makes `bookstore.local` Ingress access and NodePort/public-demo access behave consistently.
 
 ## 9. Image update strategy in Minikube
 
@@ -240,14 +255,14 @@ That is convenient for a course project, but it creates a stale image risk in Mi
 2. builds backend image,
 3. verifies backend image contains `admin_books.py`,
 4. builds frontend image,
-5. saves current backend/frontend replica counts,
-6. scales backend/frontend Deployments to zero,
+5. saves current public-backend/admin-backend/monitoring-backend/frontend replica counts,
+6. scales split backend/frontend Deployments to zero,
 7. removes old same-tag images inside Minikube,
 8. loads fresh backend/frontend images into Minikube,
 9. applies manifests and PostgreSQL init ConfigMap/Job logic,
-10. restores backend/frontend replica counts,
+10. restores split backend/frontend replica counts,
 11. waits for rollouts,
-12. verifies a running backend Pod contains `admin_books.py`.
+12. verifies a running Pod from each backend Deployment contains `admin_books.py`.
 
 PostgreSQL is not scaled down by this workflow, so demo data is preserved unless the init Job is explicitly forced with `FORCE_POSTGRES_INIT=1`.
 
@@ -257,13 +272,13 @@ This is an important defense point: declarative manifests describe desired Kuber
 
 The HPA is defined in `k8s/hpa.yaml`:
 
-- target: backend Deployment,
+- target: public-backend Deployment,
 - metric: CPU utilization,
 - `minReplicas: 2`,
 - `maxReplicas: 5`,
 - target average CPU utilization: `50%`.
 
-The backend Deployment defines CPU requests (`100m`). This is required because HPA utilization is calculated relative to requested CPU, not total node CPU.
+The public-backend Deployment defines CPU requests (`100m`). This is required because HPA utilization is calculated relative to requested CPU, not total node CPU.
 
 Why HPA CPU can exceed `100%`:
 
@@ -272,8 +287,8 @@ Why HPA CPU can exceed `100%`:
 
 Expected behavior:
 
-- Before load: backend runs at 2 replicas and HPA has a known CPU value.
-- During load: CPU rises above 50%, desired replicas increase, and new backend Pods are created.
+- Before load: public-backend runs at 2 replicas and HPA has a known CPU value.
+- During load: CPU rises above 50%, desired replicas increase, and new public-backend Pods are created.
 - After load: HPA eventually scales back toward 2 replicas.
 - Scale-down can take several minutes because Kubernetes intentionally stabilizes scale-down decisions to avoid flapping.
 
@@ -305,7 +320,7 @@ It:
 - requires `hey`,
 - defaults to `TARGET_URL=http://$(minikube ip):30080/api/books`,
 - defaults to `DURATION=180s` and `CONCURRENCY=50`,
-- verifies namespace, backend Deployment, HPA, and metrics readiness,
+- verifies namespace, public-backend Deployment, public-backend HPA, and metrics readiness,
 - prints baseline HPA, Deployment, Pod, and `top pods` evidence,
 - runs sustained load with `hey`,
 - monitors HPA/Deployment/Pods/metrics while load is running,
@@ -335,23 +350,23 @@ Backend status API behavior:
 
 - loads in-cluster Kubernetes config when running in Kubernetes,
 - falls back to local kubeconfig when available,
-- reads the backend Deployment,
-- reads `backend-hpa`,
-- lists backend Pods with selector `app=backend`,
+- reads the public-backend Deployment,
+- reads `public-backend-hpa`,
+- lists public-backend Pods with selector `app=public-backend`,
 - reads `metrics.k8s.io` Pod metrics when metrics-server is available,
 - returns `metricsAvailable: false` and warnings when metrics are unavailable.
 
 RBAC:
 
-- ServiceAccount: `bookstore-backend`,
+- ServiceAccount: `bookstore-monitoring-backend`,
 - Role: namespace-scoped read/list/watch for Pods, Deployments, HPAs, and Pod metrics,
-- RoleBinding: binds the role to backend Pods.
+- RoleBinding: binds the role only to monitoring-backend Pods.
 
 Frontend dashboard behavior:
 
 - shows Deployment replica status,
 - shows HPA CPU/replica status,
-- shows a backend Pods table,
+- shows a public-backend Pods table,
 - shows frontend-only rolling replica and CPU charts,
 - refreshes automatically every 5 seconds,
 - keeps chart samples only in browser memory.
@@ -567,6 +582,6 @@ Use this as a short 2-3 minute opening script:
 >
 > For local development, the full stack runs with Docker Compose. For the cloud-native part, the same application is deployed to Minikube with Kubernetes manifests for namespace isolation, ConfigMaps, Secrets, Deployments, Services, health probes, a PostgreSQL PVC, an initialization Job, Ingress, backend RBAC, and an HPA. The backend is autoscaled from 2 to up to 5 replicas based on CPU utilization.
 >
-> The live demo will show the user bookstore flow, then the Admin Demo for adding a temporary book and adjusting stock, then the in-app Monitoring Dashboard. The dashboard calls a FastAPI cluster-status endpoint, and the backend reads Kubernetes Deployment, HPA, Pod, and metrics data using read-only RBAC. Finally, the HPA demo script generates load with `hey`, showing CPU rise, backend Pods scale out, and the dashboard charts update.
+> The live demo will show the user bookstore flow, then the Admin Demo for adding a temporary book and adjusting stock, then the in-app Monitoring Dashboard. The dashboard calls a FastAPI cluster-status endpoint, and monitoring-backend reads public-backend Deployment, HPA, Pod, and metrics data using read-only RBAC. Finally, the HPA demo script generates load with `hey`, showing CPU rise, public-backend Pods scale out, and the dashboard charts update.
 >
 > The main lesson is that cloud-native development is not just writing application code. It also includes container image management, Kubernetes resource design, health checks, persistent storage, runtime configuration, autoscaling dependencies like metrics-server, repeatable scripts, and practical demo/operations workflows.

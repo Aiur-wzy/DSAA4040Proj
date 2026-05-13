@@ -81,6 +81,17 @@ expect_http_200 "${BASE_URL}/"
 expect_body_contains "${BASE_URL}/api/health" '"status"[[:space:]]*:[[:space:]]*"ok"' "/api/health reports backend ok"
 expect_body_contains "${BASE_URL}/api/health/db" '"database"[[:space:]]*:[[:space:]]*"connected"' "/api/health/db reports database ok"
 expect_body_contains "${BASE_URL}/api/books" '"title"|"author"' "/api/books returns book data"
+cluster_status_body="$(http_body "${BASE_URL}/api/admin/cluster/status")" || fail "/api/admin/cluster/status route is unavailable"
+if grep -Eqi '"namespace"[[:space:]]*:[[:space:]]*"bookstore"' <<<"$cluster_status_body"; then
+  pass "/api/admin/cluster/status route returns cluster status JSON"
+else
+  echo "Response body from ${BASE_URL}/api/admin/cluster/status:" >&2
+  echo "$cluster_status_body" >&2
+  fail "/api/admin/cluster/status did not return expected cluster status JSON"
+fi
+if grep -Eqi '"metricsAvailable"[[:space:]]*:[[:space:]]*false' <<<"$cluster_status_body"; then
+  echo "INFO: /api/admin/cluster/status route is reachable, but metrics are not currently available."
+fi
 
 echo
 echo "PASS: Kubernetes Minikube service tests completed successfully"

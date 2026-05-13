@@ -18,6 +18,12 @@ echo "WARNING: This removes Kubernetes demo data and may delete PVC-backed Postg
 echo
 echo "==== Deleting resources defined in k8s/ ===="
 "${KUBECTL[@]}" delete -f k8s/ --ignore-not-found=true
+"${KUBECTL[@]}" delete hpa backend-hpa -n bookstore --ignore-not-found=true
+"${KUBECTL[@]}" delete deployment backend -n bookstore --ignore-not-found=true
+"${KUBECTL[@]}" delete service backend-service -n bookstore --ignore-not-found=true
+"${KUBECTL[@]}" delete rolebinding bookstore-backend-readonly -n bookstore --ignore-not-found=true
+"${KUBECTL[@]}" delete role bookstore-backend-readonly -n bookstore --ignore-not-found=true
+"${KUBECTL[@]}" delete serviceaccount bookstore-backend -n bookstore --ignore-not-found=true
 
 echo
 echo "==== Deleting postgres-init-sql ConfigMap if it exists ===="

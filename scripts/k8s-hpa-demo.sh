@@ -36,9 +36,9 @@ else
 fi
 
 NAMESPACE="bookstore"
-BACKEND_DEPLOYMENT="backend"
-BACKEND_HPA="backend-hpa"
-BACKEND_SELECTOR="app=backend"
+BACKEND_DEPLOYMENT="public-backend"
+BACKEND_HPA="public-backend-hpa"
+BACKEND_SELECTOR="app=public-backend"
 NODE_PORT="30080"
 DURATION="${DURATION:-180s}"
 CONCURRENCY="${CONCURRENCY:-50}"
@@ -134,6 +134,9 @@ echo "Observe scale down: ${OBSERVE_SCALE_DOWN}"
 "${KUBECTL[@]}" get namespace "$NAMESPACE" >/dev/null || fail "namespace/${NAMESPACE} does not exist. Deploy the app first."
 "${KUBECTL[@]}" get deployment "$BACKEND_DEPLOYMENT" -n "$NAMESPACE" >/dev/null || fail "deployment/${BACKEND_DEPLOYMENT} does not exist in namespace/${NAMESPACE}."
 "${KUBECTL[@]}" get hpa "$BACKEND_HPA" -n "$NAMESPACE" >/dev/null || fail "hpa/${BACKEND_HPA} does not exist in namespace/${NAMESPACE}."
+hpa_target="$("${KUBECTL[@]}" get hpa "$BACKEND_HPA" -n "$NAMESPACE" -o jsonpath='{.spec.scaleTargetRef.kind}/{.spec.scaleTargetRef.name}')"
+[[ "$hpa_target" == "Deployment/${BACKEND_DEPLOYMENT}" ]] || fail "hpa/${BACKEND_HPA} targets ${hpa_target}, expected Deployment/${BACKEND_DEPLOYMENT}."
+echo "Verified hpa/${BACKEND_HPA} targets Deployment/${BACKEND_DEPLOYMENT}."
 if ! "${KUBECTL[@]}" top pods -n "$NAMESPACE" >/dev/null; then
   need_metrics_fix
   exit 1
@@ -145,13 +148,13 @@ fi
 
 echo
 echo "CPU utilization note: HPA CPU percentage is relative to each container's CPU request, not total node CPU."
-echo "For example, if backend requests 100m CPU and uses 300m CPU, HPA can report about 300%."
-echo "This script verifies and demonstrates the existing HPA; it does not modify HPA configuration."
+echo "For example, if public-backend requests 100m CPU and uses 300m CPU, HPA can report about 300%."
+echo "This script verifies and demonstrates the public-backend HPA; it does not modify HPA configuration."
 
 INITIAL_REPLICAS="$(current_replicas)"
 SCALED_UP=false
 
-echo "Initial backend replica count: ${INITIAL_REPLICAS}"
+echo "Initial public-backend replica count: ${INITIAL_REPLICAS}"
 
 step "Baseline evidence before load"
 print_evidence_snapshot
@@ -169,7 +172,7 @@ while kill -0 "$HEY_PID" >/dev/null 2>&1; do
   if [[ "$replicas" =~ ^[0-9]+$ ]] && (( replicas > INITIAL_REPLICAS )); then
     if [[ "$SCALED_UP" != "true" ]]; then
       echo
-      echo "SUCCESS: backend replicas increased from ${INITIAL_REPLICAS} to ${replicas}."
+      echo "SUCCESS: public-backend replicas increased from ${INITIAL_REPLICAS} to ${replicas}."
       SCALED_UP=true
     fi
   else
@@ -197,11 +200,11 @@ FINAL_REPLICAS="$(current_replicas)"
 if [[ "$FINAL_REPLICAS" =~ ^[0-9]+$ ]] && (( FINAL_REPLICAS > INITIAL_REPLICAS )); then
   SCALED_UP=true
   echo
-  echo "SUCCESS: backend replicas increased from ${INITIAL_REPLICAS} to ${FINAL_REPLICAS}."
+  echo "SUCCESS: public-backend replicas increased from ${INITIAL_REPLICAS} to ${FINAL_REPLICAS}."
 elif [[ "$SCALED_UP" != "true" ]]; then
   echo
-  echo "Warning: backend replicas did not increase above ${INITIAL_REPLICAS} during this run."
-  echo "Check HPA events above, backend CPU usage, and whether the load target reached the backend."
+  echo "Warning: public-backend replicas did not increase above ${INITIAL_REPLICAS} during this run."
+  echo "Check HPA events above, public-backend CPU usage, and whether the load target reached public-backend."
 fi
 
 if [[ "$OBSERVE_SCALE_DOWN" == "true" ]]; then
@@ -225,8 +228,8 @@ cat <<'EOF_CHECKLIST'
 - pod CPU before load
 - load generator output
 - HPA during load
-- backend Deployment scaling from 2 to more replicas
-- backend Pods being created
+- public-backend Deployment scaling from 2 to more replicas
+- public-backend Pods being created
 - pod CPU during load
 - HPA describe output
 - scale-down evidence if captured

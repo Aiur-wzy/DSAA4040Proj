@@ -131,7 +131,7 @@ if [[ "$CLEANUP" == true ]]; then
 fi
 
 echo "Forwarding public TCP ${PUBLIC_PORT} to ${MINIKUBE_IP}:${NODE_PORT}."
-echo "This script only exposes frontend-service. It does not expose backend-service or postgres-service publicly."
+echo "This script only exposes frontend-service. It does not expose any backend Service or postgres-service publicly."
 
 run_sudo sysctl -w net.ipv4.ip_forward=1 >/dev/null
 ensure_docker_user_chain

@@ -8,11 +8,25 @@ spec:
     - host: bookstore.local
       http:
         paths:
+          - path: /api/admin/cluster
+            pathType: Prefix
+            backend:
+              service:
+                name: monitoring-backend-service
+                port:
+                  number: 8000
+          - path: /api/admin
+            pathType: Prefix
+            backend:
+              service:
+                name: admin-backend-service
+                port:
+                  number: 8000
           - path: /api
             pathType: Prefix
             backend:
               service:
-                name: backend-service
+                name: public-backend-service
                 port:
                   number: 8000
           - path: /

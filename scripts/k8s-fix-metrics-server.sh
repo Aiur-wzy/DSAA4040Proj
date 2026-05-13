@@ -183,7 +183,7 @@ retry 18 10 "kubectl top nodes" verify_top_nodes || fail "Metrics API did not be
 retry 18 10 "kubectl top pods -n ${NAMESPACE}" verify_top_pods || fail "Metrics API did not become available for namespace '${NAMESPACE}'."
 
 step "[5/5] Checking HPA CPU metrics"
-retry 18 10 "HPA CPU metrics" hpa_has_known_metrics || fail "HPA still shows <unknown> CPU metrics after retries. Confirm backend Pods are Running and have CPU requests."
+retry 18 10 "HPA CPU metrics" hpa_has_known_metrics || fail "public-backend HPA still shows <unknown> CPU metrics after retries. Confirm public-backend HPA target Pods are Running and have CPU requests."
 
 echo
-echo "Metrics-server is running and HPA can read CPU metrics."
+echo "Metrics-server is running and the public-backend HPA can read CPU metrics."

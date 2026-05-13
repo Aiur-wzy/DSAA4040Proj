@@ -57,9 +57,10 @@ echo "=== HPA ==="
 "${KUBECTL[@]}" get hpa -n "$NAMESPACE"
 
 echo
-echo "=== backend-service endpoints ==="
-"${KUBECTL[@]}" get endpoints backend-service -n "$NAMESPACE" -o wide
-
-echo
+for service in public-backend-service admin-backend-service monitoring-backend-service; do
+  echo "=== ${service} endpoints ==="
+  "${KUBECTL[@]}" get endpoints "$service" -n "$NAMESPACE" -o wide
+  echo
+done
 echo "=== frontend-service endpoints ==="
 "${KUBECTL[@]}" get endpoints frontend-service -n "$NAMESPACE" -o wide

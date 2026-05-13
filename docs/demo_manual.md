@@ -4,7 +4,7 @@ This manual is a practical runbook for the final live demo. It assumes you are r
 
 ## 1. Demo goal
 
-This demo proves that the DSAA 4040 Online Bookstore is a cloud-native three-tier application: a React/Vite frontend served by Nginx, a FastAPI backend, and PostgreSQL are containerized, deployed on Kubernetes, health-checked, and exercised through real catalog, cart, order, admin inventory, HPA autoscaling, and browser-based Monitoring Dashboard flows. If needed, the same Kubernetes frontend can be exposed publicly through the existing iptables demo script.
+This demo proves that the DSAA 4040 Online Bookstore is a cloud-native three-tier application: a React/Vite frontend served by Nginx, split FastAPI backends, and PostgreSQL are containerized, deployed on Kubernetes, health-checked, and exercised through real catalog, cart, order, admin inventory, HPA autoscaling, and browser-based Monitoring Dashboard flows. If needed, the same Kubernetes frontend can be exposed publicly through the existing iptables demo script.
 
 ## 2. Pre-demo checklist
 
@@ -37,7 +37,7 @@ For any frontend, backend, or Kubernetes manifest changes, use the standard rebu
 ./scripts/k8s-rebuild-and-deploy.sh
 ```
 
-Why: the Kubernetes manifests use stable local image tags (`bookstore-backend:latest` and `bookstore-frontend:latest`). A plain `kubectl apply` may leave Minikube running stale same-tag images. The rebuild/deploy script builds fresh images, loads them into Minikube, removes old same-tag images, reapplies manifests, restores replicas, and waits for rollouts.
+Why: the Kubernetes manifests use stable local image tags (`bookstore-backend:latest` and `bookstore-frontend:latest`). A plain `kubectl apply` may leave Minikube running stale same-tag images. The rebuild/deploy script builds fresh images, loads them into Minikube, removes old same-tag images, reapplies manifests, restores replicas for public/admin/monitoring backends plus frontend, and waits for rollouts.
 
 Verify afterward:
 
@@ -60,7 +60,7 @@ Expected results:
 
 - metrics-server is `Running` in `kube-system`.
 - `kubectl top pods -n bookstore` returns CPU and memory values.
-- `backend-hpa` no longer shows `<unknown>` for CPU.
+- `public-backend-hpa` no longer shows `<unknown>` for CPU.
 
 ## 5. Public browser demo exposure
 
@@ -98,7 +98,7 @@ PUBLIC_PORT=3000 NODE_PORT=30080 ./scripts/k8s-expose-demo.sh --cleanup
 2. Show the homepage title and backend/DB status line.
 3. Show the book list.
 4. Use search if useful; the UI searches by title, author, or category.
-5. Explain: the browser loads a React/Vite frontend served by Nginx. Nginx proxies `/api` requests to FastAPI.
+5. Explain: the browser loads a React/Vite frontend served by Nginx. Nginx uses path-based routing: `/api/admin/cluster/` to monitoring-backend, `/api/admin/` to admin-backend, and `/api/` to public-backend.
 
 ### Step B: Cart and order flow
 
@@ -132,12 +132,12 @@ PUBLIC_PORT=3000 NODE_PORT=30080 ./scripts/k8s-expose-demo.sh --cleanup
 ### Step D: Monitoring Dashboard
 
 1. Click **Monitoring**.
-2. Show the **Backend Deployment** card.
+2. Show the **public-backend Deployment** card.
 3. Show the **HPA** card.
-4. Show the **Backend Pods** table.
+4. Show the **public-backend Pods** table.
 5. Show the replicas chart.
 6. Show the CPU chart.
-7. Explain: the frontend calls FastAPI at `GET /api/admin/cluster/status`; FastAPI uses the Kubernetes Python client and namespace-scoped read-only RBAC to read Deployment, HPA, Pod, and metrics data.
+7. Explain: the frontend calls FastAPI at `GET /api/admin/cluster/status`; the monitoring-backend FastAPI Pod uses the Kubernetes Python client and namespace-scoped read-only RBAC to read public-backend Deployment, HPA, Pod, and metrics data.
 
 ### Step E: HPA autoscaling demo
 
@@ -151,15 +151,15 @@ Optional watch commands in extra terminals:
 
 ```bash
 minikube kubectl -- get hpa -n bookstore -w
-minikube kubectl -- get pods -n bookstore -l app=backend -w
+minikube kubectl -- get pods -n bookstore -l app=public-backend -w
 ```
 
 Expected behavior:
 
-- backend replicas start at `2`.
+- public-backend replicas start at `2`.
 - CPU rises above the `50%` target.
-- backend scales to `3`, `4`, or `5` replicas depending on load.
-- new backend Pods appear and move toward `Running`/ready.
+- public-backend scales to `3`, `4`, or `5` replicas depending on load.
+- new public-backend Pods appear and move toward `Running`/ready.
 - Monitoring Dashboard cards, Pod table, and charts update during auto-refresh.
 - after load stops, replicas eventually scale back down to `2`; scale-down can take several minutes because of Kubernetes HPA stabilization behavior.
 
@@ -192,14 +192,14 @@ BASE_URL=http://$(minikube ip):30080 ./scripts/test-admin-api.sh
 - Admin route returns `404`:
 
   ```bash
-  minikube kubectl -- exec -n bookstore deploy/backend -- find / -name admin_books.py
+  minikube kubectl -- exec -n bookstore deploy/admin-backend -- find / -name admin_books.py
   ./scripts/k8s-rebuild-and-deploy.sh
   ```
 
 - Monitoring route returns `404`:
 
   ```bash
-  minikube kubectl -- exec -n bookstore deploy/backend -- find / -name cluster_status.py
+  minikube kubectl -- exec -n bookstore deploy/monitoring-backend -- find / -name cluster_status.py
   ./scripts/k8s-rebuild-and-deploy.sh
   ```
 
@@ -207,11 +207,11 @@ BASE_URL=http://$(minikube ip):30080 ./scripts/test-admin-api.sh
 
   ```bash
   minikube kubectl -- get serviceaccount,role,rolebinding -n bookstore
-  minikube kubectl -- auth can-i get deployments -n bookstore --as=system:serviceaccount:bookstore:bookstore-backend
-  minikube kubectl -- auth can-i list pods.metrics.k8s.io -n bookstore --as=system:serviceaccount:bookstore:bookstore-backend
+  minikube kubectl -- auth can-i get deployments -n bookstore --as=system:serviceaccount:bookstore:bookstore-monitoring-backend
+  minikube kubectl -- auth can-i list pods.metrics.k8s.io -n bookstore --as=system:serviceaccount:bookstore:bookstore-monitoring-backend
   ```
 
-- HPA shows `<unknown>`:
+- public-backend HPA shows `<unknown>`:
 
   ```bash
   ./scripts/k8s-fix-metrics-server.sh
@@ -229,7 +229,7 @@ BASE_URL=http://$(minikube ip):30080 ./scripts/test-admin-api.sh
   ```bash
   hey -h
   DURATION=240s CONCURRENCY=60 ./scripts/k8s-hpa-demo.sh
-  minikube kubectl -- describe hpa backend-hpa -n bookstore
+  minikube kubectl -- describe hpa public-backend-hpa -n bookstore
   minikube kubectl -- get deployment backend -n bookstore -o jsonpath='{.spec.template.spec.containers[0].resources.requests.cpu}{"\n"}'
   ```
 
@@ -256,5 +256,5 @@ Collect screenshots or terminal output for:
 - Monitoring Dashboard before load,
 - HPA demo terminal output,
 - Monitoring Dashboard during load with charts,
-- backend Pods scaling up,
+- public-backend Pods scaling up,
 - scale-down evidence if captured.
