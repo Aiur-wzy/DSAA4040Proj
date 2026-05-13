@@ -56,11 +56,22 @@ echo
 echo "=== HPA ==="
 "${KUBECTL[@]}" get hpa -n "$NAMESPACE"
 
+print_service_endpoints() {
+  local service="$1"
+
+  echo "=== ${service} EndpointSlices ==="
+  if "${KUBECTL[@]}" get endpointslices -n "$NAMESPACE" -l "kubernetes.io/service-name=${service}" -o wide >/tmp/k8s-status-endpointslices.$$ 2>/dev/null; then
+    cat /tmp/k8s-status-endpointslices.$$
+    rm -f /tmp/k8s-status-endpointslices.$$
+  else
+    rm -f /tmp/k8s-status-endpointslices.$$
+    echo "EndpointSlice lookup unavailable; falling back to legacy Endpoints API."
+    "${KUBECTL[@]}" get endpoints "$service" -n "$NAMESPACE" -o wide
+  fi
+}
+
 echo
-for service in public-backend-service admin-backend-service monitoring-backend-service; do
-  echo "=== ${service} endpoints ==="
-  "${KUBECTL[@]}" get endpoints "$service" -n "$NAMESPACE" -o wide
+for service in public-backend-service admin-backend-service monitoring-backend-service frontend-service; do
+  print_service_endpoints "$service"
   echo
 done
-echo "=== frontend-service endpoints ==="
-"${KUBECTL[@]}" get endpoints frontend-service -n "$NAMESPACE" -o wide

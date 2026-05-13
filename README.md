@@ -83,9 +83,43 @@ hey -h
 
 ## 4. Updating an Existing Minikube Deployment
 
+### Full Kubernetes Update Workflow
+
+For major code or Kubernetes changes, run the full update workflow:
+
+```bash
+./scripts/k8s-full-update.sh
+```
+
+This top-level workflow rebuilds and deploys the split-backend bookstore system, repairs/checks `metrics-server`, repairs/checks `ingress-nginx`, verifies NodePort and Ingress routes, runs API smoke tests, prints cluster status, and ends with the next demo commands. It keeps the existing public browser exposure behavior unchanged; the public demo still uses:
+
+```bash
+PUBLIC_PORT=3000 NODE_PORT=30080 ./scripts/k8s-expose-demo.sh
+```
+
+The focused scripts remain available independently:
+
+- `./scripts/k8s-rebuild-and-deploy.sh` rebuilds images and applies only the bookstore app manifests.
+- `./scripts/k8s-fix-metrics-server.sh` repairs/checks HPA metrics support.
+- `./scripts/k8s-fix-ingress.sh` repairs/checks Minikube Ingress support.
+
+Ingress tests use the Minikube IP plus the host header, for example:
+
+```bash
+curl -H "Host: bookstore.local" http://$(minikube ip)/api/books
+```
+
+If the ingress addon fails with `ImagePullBackOff`, `ErrImagePull`, or `manifest unknown` for `kube-webhook-certgen` or `nginx-ingress-controller`, run:
+
+```bash
+./scripts/k8s-fix-ingress.sh
+```
+
+That failure is usually caused by bad tag+digest images from the Minikube addon mirror. The repair script patches ingress-nginx to Aliyun tag-only images and verifies the ingress controller and bookstore routes.
+
 This is the primary workflow for repeated frontend, backend, or Kubernetes configuration changes. Do **not** only run `kubectl apply` after changing frontend or backend code: Minikube can continue running Pods that use stale local images when the Deployment image tag remains `bookstore-frontend:latest` or `bookstore-backend:latest`.
 
-The standardized update command is:
+The focused rebuild/deploy command is:
 
 ```bash
 ./scripts/k8s-rebuild-and-deploy.sh

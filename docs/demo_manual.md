@@ -31,7 +31,37 @@ Expected results:
 
 ## 3. Standard update before demo
 
-For any frontend, backend, or Kubernetes manifest changes, use the standard rebuild/deploy workflow:
+### Full Kubernetes Update Workflow
+
+For major frontend, backend, or Kubernetes manifest changes, use the top-level workflow:
+
+```bash
+./scripts/k8s-full-update.sh
+```
+
+It rebuilds and deploys the split-backend bookstore system, repairs/checks `metrics-server`, repairs/checks `ingress-nginx`, verifies NodePort and Ingress routes, runs smoke tests, prints cluster status, and prints the next demo commands.
+
+The focused scripts remain available independently:
+
+- `./scripts/k8s-rebuild-and-deploy.sh` if you only want to rebuild and apply the app.
+- `./scripts/k8s-fix-metrics-server.sh` for HPA metrics repair.
+- `./scripts/k8s-fix-ingress.sh` for ingress repair.
+
+The public browser demo still uses:
+
+```bash
+PUBLIC_PORT=3000 NODE_PORT=30080 ./scripts/k8s-expose-demo.sh
+```
+
+Ingress tests use:
+
+```bash
+curl -H "Host: bookstore.local" http://$(minikube ip)/api/books
+```
+
+If `minikube addons enable ingress` hangs or fails with `ImagePullBackOff`, `ErrImagePull`, or `manifest unknown` for `kube-webhook-certgen` or `nginx-ingress-controller`, run `./scripts/k8s-fix-ingress.sh`. This is caused by bad tag+digest images from the Minikube addon mirror; the script patches to Aliyun tag-only images and verifies the ingress controller.
+
+For app-only changes, use the focused rebuild/deploy workflow:
 
 ```bash
 ./scripts/k8s-rebuild-and-deploy.sh

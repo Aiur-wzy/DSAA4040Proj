@@ -240,7 +240,37 @@ All three Deployments use `bookstore-backend:latest`, port `8000`, the same Conf
 
 Ingress and frontend Nginx both route by path: `/api/admin/cluster` to monitoring, `/api/admin` to admin, `/api` to public, and `/` to the React SPA. This makes `bookstore.local` Ingress access and NodePort/public-demo access behave consistently.
 
-## 9. Image update strategy in Minikube
+## 9. Full Kubernetes Update Workflow
+
+For major updates, run:
+
+```bash
+./scripts/k8s-full-update.sh
+```
+
+This orchestrates the operational workflow end to end: preflight checks, split-backend bookstore rebuild/deploy, NodePort route verification, `metrics-server` repair/check, `ingress-nginx` repair/check, public/admin API smoke tests, Monitoring API verification, HPA readiness check, cluster status, and next demo commands.
+
+The focused scripts remain useful for isolated tasks:
+
+- `./scripts/k8s-rebuild-and-deploy.sh` rebuilds and applies the app only.
+- `./scripts/k8s-fix-metrics-server.sh` repairs/checks HPA metrics.
+- `./scripts/k8s-fix-ingress.sh` repairs/checks Minikube Ingress.
+
+Public browser exposure is unchanged and still uses:
+
+```bash
+PUBLIC_PORT=3000 NODE_PORT=30080 ./scripts/k8s-expose-demo.sh
+```
+
+Ingress verification uses host-header requests to the Minikube IP:
+
+```bash
+curl -H "Host: bookstore.local" http://$(minikube ip)/api/books
+```
+
+If the ingress addon fails with `ImagePullBackOff`, `ErrImagePull`, or `manifest unknown` for `kube-webhook-certgen` or `nginx-ingress-controller`, run `./scripts/k8s-fix-ingress.sh`. The failure is caused by bad tag+digest images from the Minikube addon mirror; the script patches to Aliyun tag-only images and verifies the ingress controller and bookstore routes.
+
+## 10. Image update strategy in Minikube
 
 The project uses stable local tags:
 
@@ -268,7 +298,7 @@ PostgreSQL is not scaled down by this workflow, so demo data is preserved unless
 
 This is an important defense point: declarative manifests describe desired Kubernetes objects, but local image lifecycle still matters when reusing stable tags in Minikube.
 
-## 10. HPA autoscaling
+## 11. HPA autoscaling
 
 The HPA is defined in `k8s/hpa.yaml`:
 
@@ -292,7 +322,7 @@ Expected behavior:
 - After load: HPA eventually scales back toward 2 replicas.
 - Scale-down can take several minutes because Kubernetes intentionally stabilizes scale-down decisions to avoid flapping.
 
-## 11. metrics-server repair script
+## 12. metrics-server repair script
 
 `./scripts/k8s-fix-metrics-server.sh` exists because HPA depends on the Kubernetes Metrics API. In Minikube, metrics-server can fail if the addon uses a bad tag+digest image or cannot pull the selected image. When that happens:
 
@@ -311,7 +341,7 @@ The script:
 7. verifies `kubectl top pods -n bookstore`,
 8. verifies HPA no longer shows `<unknown>`.
 
-## 12. HPA demo script
+## 13. HPA demo script
 
 `./scripts/k8s-hpa-demo.sh` is the repeatable autoscaling demo workflow.
 
@@ -336,7 +366,7 @@ DURATION=240s CONCURRENCY=60 ./scripts/k8s-hpa-demo.sh
 OBSERVE_SCALE_DOWN=false ./scripts/k8s-hpa-demo.sh
 ```
 
-## 13. In-app Monitoring Dashboard
+## 14. In-app Monitoring Dashboard
 
 Purpose: provide demo-oriented observability inside the application without adding Prometheus, Grafana, another service, or a monitoring database.
 
@@ -384,7 +414,7 @@ Why no Prometheus/Grafana:
 - adding Prometheus/Grafana would add services and operational complexity,
 - the project intentionally avoids new services for the final demo.
 
-## 14. Admin Demo
+## 15. Admin Demo
 
 Purpose: demonstrate catalog and inventory management without leaving the bookstore application.
 
@@ -407,7 +437,7 @@ Security note:
 - the Admin Demo is intentionally unauthenticated for a course demo,
 - production would require authentication, authorization/RBAC, audit logs, and likely separate admin roles.
 
-## 15. Public demo exposure
+## 16. Public demo exposure
 
 The Kubernetes frontend Service is a NodePort Service on `30080`. On a cloud VM, the Minikube IP is usually internal to the VM and not directly reachable from a public browser.
 
@@ -427,7 +457,7 @@ Key points:
 - cleanup uses `PUBLIC_PORT=3000 NODE_PORT=30080 ./scripts/k8s-expose-demo.sh --cleanup`,
 - production would normally use a cloud LoadBalancer, public Ingress, DNS, and TLS instead.
 
-## 16. Testing and verification scripts
+## 17. Testing and verification scripts
 
 | Script | What it validates |
 |---|---|
@@ -447,7 +477,7 @@ Other useful scripts:
 - `scripts/k8s-cleanup.sh`: deletes Kubernetes resources in the `bookstore` namespace.
 - `scripts/compose-up.sh`, `scripts/compose-status.sh`, `scripts/compose-logs.sh`, `scripts/compose-down.sh`: Docker Compose helpers.
 
-## 17. Tools and technologies
+## 18. Tools and technologies
 
 | Tool/technology | Where it is used | Why it is used | What it demonstrates |
 |---|---|---|---|
@@ -471,7 +501,7 @@ Other useful scripts:
 | iptables | `k8s-expose-demo.sh` | Public demo port forwarding to NodePort | Demo network exposure workaround |
 | Bash scripts | `scripts/` | Repeatable operational workflows | Deployment/test automation |
 
-## 18. Possible defense questions and answers
+## 19. Possible defense questions and answers
 
 **Q: Why use Kubernetes instead of only Docker Compose?**
 
@@ -549,7 +579,7 @@ A: The frontend is exposed internally through NodePort `30080`. The iptables scr
 
 A: It uses single-node Minikube, demo-only admin access, demo-only iptables exposure, simple Secret management, no payment/shipping, no Prometheus/Grafana, and lightweight dashboard history only in browser memory.
 
-## 19. Known limitations and future work
+## 20. Known limitations and future work
 
 Known limitations:
 
@@ -574,7 +604,7 @@ Possible future work:
 - use a managed PostgreSQL service with backups,
 - run on a multi-node Kubernetes cluster.
 
-## 20. Final presentation talking points
+## 21. Final presentation talking points
 
 Use this as a short 2-3 minute opening script:
 
