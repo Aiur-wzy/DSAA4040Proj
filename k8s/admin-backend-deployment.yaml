@@ -1,25 +1,27 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: backend
+  name: admin-backend
   namespace: bookstore
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
-      app: backend
+      app: admin-backend
   template:
     metadata:
       labels:
-        app: backend
+        app: admin-backend
     spec:
-      serviceAccountName: bookstore-backend
       containers:
         - name: backend
           image: bookstore-backend:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
+          env:
+            - name: BACKEND_MODE
+              value: admin
           envFrom:
             - configMapRef:
                 name: bookstore-config

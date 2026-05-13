@@ -116,9 +116,9 @@ If the browser still shows an old frontend or backend version, check that:
 
 - the relevant Docker image was rebuilt on the host Docker daemon
 - the rebuilt image was loaded into Minikube with `minikube image load`
-- the frontend and backend Deployments were restarted after the image load
+- the frontend and split backend Deployments were restarted after the image load
 - Pods were recreated after the restart
-- image tags in `docker-compose.yml`, `k8s/backend-deployment.yaml`, and `k8s/frontend-deployment.yaml` still match the stable local tags used by the project
+- image tags in `docker-compose.yml`, the split backend deployment manifests, and `k8s/frontend-deployment.yaml` still match the stable local tags used by the project
 
 ### 4.1 Optional PostgreSQL init rerun
 
@@ -149,17 +149,24 @@ minikube kubectl -- apply -f k8s/configmap.yaml
 minikube kubectl -- apply -f k8s/secret.yaml
 minikube kubectl -- apply -f k8s/postgres-service.yaml
 minikube kubectl -- apply -f k8s/postgres-deployment.yaml
-minikube kubectl -- apply -f k8s/backend-service.yaml
-minikube kubectl -- apply -f k8s/backend-deployment.yaml
+minikube kubectl -- apply -f k8s/monitoring-backend-rbac.yaml
+minikube kubectl -- apply -f k8s/public-backend-service.yaml
+minikube kubectl -- apply -f k8s/admin-backend-service.yaml
+minikube kubectl -- apply -f k8s/monitoring-backend-service.yaml
+minikube kubectl -- apply -f k8s/public-backend-deployment.yaml
+minikube kubectl -- apply -f k8s/admin-backend-deployment.yaml
+minikube kubectl -- apply -f k8s/monitoring-backend-deployment.yaml
 minikube kubectl -- apply -f k8s/frontend-service.yaml
 minikube kubectl -- apply -f k8s/frontend-deployment.yaml
 minikube kubectl -- apply -f k8s/ingress.yaml
 minikube kubectl -- apply -f k8s/hpa.yaml
 
 # Restart Pods so the stable local tags resolve to the newly loaded images.
-minikube kubectl -- rollout restart deployment/backend -n bookstore
+minikube kubectl -- rollout restart deployment/public-backend deployment/admin-backend deployment/monitoring-backend -n bookstore
 minikube kubectl -- rollout restart deployment/frontend -n bookstore
-minikube kubectl -- rollout status deployment/backend -n bookstore --timeout=240s
+minikube kubectl -- rollout status deployment/public-backend -n bookstore --timeout=240s
+minikube kubectl -- rollout status deployment/admin-backend -n bookstore --timeout=240s
+minikube kubectl -- rollout status deployment/monitoring-backend -n bookstore --timeout=240s
 minikube kubectl -- rollout status deployment/frontend -n bookstore --timeout=240s
 ```
 
@@ -261,8 +268,8 @@ BASE_URL=http://$(minikube ip):30080 ./scripts/test-admin-api.sh
 If a newly added route still returns `404` after a rebuild/deploy, verify that the running backend Pod actually contains the new route file before debugging application routing. For the admin API route, for example:
 
 ```bash
-BACKEND_POD=$(minikube kubectl -- get pod -n bookstore -l app=backend -o jsonpath='{.items[0].metadata.name}')
-minikube kubectl -- exec -n bookstore "$BACKEND_POD" -- find / -name "admin_books.py" 2>/dev/null
+ADMIN_BACKEND_POD=$(minikube kubectl -- get pod -n bookstore -l app=admin-backend -o jsonpath='{.items[0].metadata.name}')
+minikube kubectl -- exec -n bookstore "$ADMIN_BACKEND_POD" -- find / -name "admin_books.py" 2>/dev/null
 ```
 
 No output means the Pod is still running a stale image or the file was not copied into the image. Re-run `./scripts/k8s-rebuild-and-deploy.sh`; it should fail clearly if the host image or running Pod is missing `admin_books.py`.
@@ -272,7 +279,7 @@ Book deletion may return a clear conflict error when the book is referenced by h
 
 ## 4.6 HPA metrics-server repair and autoscaling demo
 
-Kubernetes HPA needs the Metrics API from `metrics-server` before it can calculate CPU utilization. If `backend-hpa` shows `cpu: <unknown>/50%`, repair and verify metrics-server with:
+Kubernetes HPA needs the Metrics API from `metrics-server` before it can calculate CPU utilization. The HPA is now `public-backend-hpa` and targets `Deployment/public-backend`. If it shows `cpu: <unknown>/50%`, repair and verify metrics-server with:
 
 ```bash
 ./scripts/k8s-fix-metrics-server.sh
@@ -294,11 +301,11 @@ DURATION=240s CONCURRENCY=30 ./scripts/k8s-hpa-demo.sh
 
 Expected behavior:
 
-- Before load: backend has 2 replicas, CPU is low, and HPA shows a known value such as `cpu: 3%/50%`.
-- During load: CPU rises above the 50% target and backend scales from 2 replicas to 3, 4, or 5 replicas.
-- After load: backend eventually scales back down to 2 replicas; scale-down may take several minutes because HPA uses stabilization behavior.
+- Before load: public-backend has 2 replicas, CPU is low, and HPA shows a known value such as `cpu: 3%/50%`.
+- During load: CPU rises above the 50% target and public-backend scales from 2 replicas to 3, 4, or 5 replicas.
+- After load: public-backend eventually scales back down to 2 replicas; scale-down may take several minutes because HPA uses stabilization behavior.
 
-HPA CPU percentages are relative to each container's CPU request, not total node CPU. For example, if the backend requests `100m` CPU and uses `300m` CPU, HPA can report about `300%`.
+HPA CPU percentages are relative to each container's CPU request, not total node CPU. For example, if public-backend requests `100m` CPU and uses `300m` CPU, HPA can report about `300%`.
 
 Screenshot/evidence checklist for the final report:
 
@@ -306,10 +313,10 @@ Screenshot/evidence checklist for the final report:
 - pod CPU before load
 - `hey` load generator output
 - HPA during load
-- backend Deployment scaling from 2 to more replicas
-- backend Pods being created (`Pending -> ContainerCreating -> Running -> Ready`)
+- public-backend Deployment scaling from 2 to more replicas
+- public-backend Pods being created (`Pending -> ContainerCreating -> Running -> Ready`)
 - pod CPU during load
-- `kubectl describe hpa backend-hpa -n bookstore` output
+- `kubectl describe hpa public-backend-hpa -n bookstore` output
 - scale-down evidence if captured
 
 ## 5. First-Time Deployment
@@ -349,16 +356,23 @@ minikube kubectl -- create configmap postgres-init-sql \
 minikube kubectl -- apply -f k8s/postgres-init-job.yaml
 minikube kubectl -- wait --for=condition=complete job/postgres-init -n bookstore --timeout=180s
 
-minikube kubectl -- apply -f k8s/backend-service.yaml
-minikube kubectl -- apply -f k8s/backend-deployment.yaml
+minikube kubectl -- apply -f k8s/monitoring-backend-rbac.yaml
+minikube kubectl -- apply -f k8s/public-backend-service.yaml
+minikube kubectl -- apply -f k8s/admin-backend-service.yaml
+minikube kubectl -- apply -f k8s/monitoring-backend-service.yaml
+minikube kubectl -- apply -f k8s/public-backend-deployment.yaml
+minikube kubectl -- apply -f k8s/admin-backend-deployment.yaml
+minikube kubectl -- apply -f k8s/monitoring-backend-deployment.yaml
 minikube kubectl -- apply -f k8s/frontend-service.yaml
 minikube kubectl -- apply -f k8s/frontend-deployment.yaml
 minikube kubectl -- apply -f k8s/ingress.yaml
 minikube kubectl -- apply -f k8s/hpa.yaml
 
-minikube kubectl -- rollout restart deployment/backend -n bookstore
+minikube kubectl -- rollout restart deployment/public-backend deployment/admin-backend deployment/monitoring-backend -n bookstore
 minikube kubectl -- rollout restart deployment/frontend -n bookstore
-minikube kubectl -- rollout status deployment/backend -n bookstore --timeout=240s
+minikube kubectl -- rollout status deployment/public-backend -n bookstore --timeout=240s
+minikube kubectl -- rollout status deployment/admin-backend -n bookstore --timeout=240s
+minikube kubectl -- rollout status deployment/monitoring-backend -n bookstore --timeout=240s
 minikube kubectl -- rollout status deployment/frontend -n bookstore --timeout=240s
 ```
 
@@ -430,6 +444,17 @@ Stop the Compose stack when finished:
 ./scripts/compose-down.sh
 ```
 
+
+### Kubernetes backend split and path routing
+
+Kubernetes no longer runs one shared backend Deployment for every API path. Phase 1 uses three Deployments that all reuse `bookstore-backend:latest` while keeping PostgreSQL and the React/Nginx frontend shared:
+
+- `public-backend` / `public-backend-service`: store APIs (`/api/health`, `/api/health/db`, `/api/books`, `/api/cart`, `/api/orders`) and the HPA target.
+- `admin-backend` / `admin-backend-service`: admin catalog and stock APIs under `/api/admin/books`.
+- `monitoring-backend` / `monitoring-backend-service`: `GET /api/admin/cluster/status`; this is the only backend Deployment with Kubernetes read-only RBAC.
+
+Both `k8s/ingress.yaml` and `frontend/nginx.conf` use the same path split: `/api/admin/cluster` routes to monitoring, `/api/admin` routes to admin, `/api` routes to public, and `/` serves the React SPA. This keeps direct Ingress access through `bookstore.local` and NodePort access through frontend Nginx consistent.
+
 ### 6.3 Kubernetes deployment verification
 
 After Minikube is running, use the rebuild/deploy helper for the full local-image Kubernetes workflow:
@@ -438,9 +463,9 @@ After Minikube is running, use the rebuild/deploy helper for the full local-imag
 ./scripts/k8s-rebuild-and-deploy.sh
 ```
 
-This script checks prerequisites, builds Docker Compose images on the host Docker daemon, verifies `bookstore-backend:latest` and `bookstore-frontend:latest`, confirms that the host backend image contains the admin route file, and then performs a safe stable-tag refresh for Minikube. Because this demo intentionally uses stable local image tags such as `:latest`, the script saves the current backend/frontend replica counts, temporarily scales only those Deployments down to zero, waits for their old Pods to exit, removes the old same-tag backend/frontend images inside Minikube, loads the freshly built images, applies the Kubernetes manifests, restores the saved replica counts, waits for rollout completion, verifies that a running backend Pod contains `admin_books.py`, and prints the Minikube NodePort URL.
+This script checks prerequisites, builds one shared backend image (`bookstore-backend:latest`) and one frontend image (`bookstore-frontend:latest`) on the host Docker daemon, confirms that the host backend image contains the admin route file, and then performs a safe stable-tag refresh for Minikube. Because this demo intentionally uses stable local image tags such as `:latest`, the script saves replica counts for `public-backend`, `admin-backend`, `monitoring-backend`, and `frontend`, temporarily scales only those application Deployments down to zero, waits for their old Pods to exit, removes the old same-tag backend/frontend images inside Minikube, loads the freshly built images, applies the Kubernetes manifests, restores the saved replica counts, waits for rollout completion, verifies that each backend Deployment has a running Pod containing `admin_books.py`, and prints the Minikube NodePort URL.
 
-The safe refresh does **not** stop PostgreSQL. The PostgreSQL Deployment, Service, PVC-backed data, `postgres-init-sql` ConfigMap update, and `FORCE_POSTGRES_INIT` behavior remain unchanged; only the backend and frontend application Pods are temporarily stopped while their same-tag local images are replaced.
+The safe refresh does **not** stop PostgreSQL. The PostgreSQL Deployment, Service, PVC-backed data, `postgres-init-sql` ConfigMap update, and `FORCE_POSTGRES_INIT` behavior remain unchanged; only the split backend and frontend application Pods are temporarily stopped while their same-tag local images are replaced.
 
 Then verify the deployed Kubernetes application:
 
@@ -454,6 +479,7 @@ Then verify the deployed Kubernetes application:
 - `/api/health`
 - `/api/health/db`
 - `/api/books`
+- `/api/admin/cluster/status`
 
 For a detailed Kubernetes resource snapshot, run:
 
@@ -461,7 +487,7 @@ For a detailed Kubernetes resource snapshot, run:
 ./scripts/k8s-status.sh
 ```
 
-`k8s-status.sh` prints Minikube status, Minikube IP, the resolved Kubernetes command mode (`kubectl` or `minikube kubectl --`), all resources in the `bookstore` namespace, Pods, Services, Ingress, HPA, and backend/frontend service endpoints.
+`k8s-status.sh` prints Minikube status, Minikube IP, the resolved Kubernetes command mode (`kubectl` or `minikube kubectl --`), all resources in the `bookstore` namespace, Pods, Services, Ingress, HPA, and public-backend/admin-backend/monitoring-backend/frontend service endpoints.
 
 ### 6.4 Public browser demo verification
 
@@ -597,13 +623,13 @@ Collect screenshots and command outputs for `report/final_report.md`.
 > This README is a practical deployment/test guide and intentionally separates **expected results** from actual runtime outcomes.
 
 ## In-app Monitoring / HPA Dashboard
-The bookstore includes a lightweight, read-only Monitoring page for the Kubernetes HPA demo. The React frontend calls the existing FastAPI backend at `GET /api/admin/cluster/status`; the backend then reads Kubernetes Deployment, HPA, Pod, and metrics status with the Kubernetes API. The browser never calls the Kubernetes API directly.
+The bookstore includes a lightweight, read-only Monitoring page for the Kubernetes HPA demo. The Kubernetes backend tier is split into `public-backend`, `admin-backend`, and `monitoring-backend` Deployments that all reuse the same `bookstore-backend:latest` image. The React frontend still calls `GET /api/admin/cluster/status`; path-based routing sends that request to `monitoring-backend`, which reads public-backend Deployment, HPA, Pod, and metrics status with the Kubernetes API. The browser never calls the Kubernetes API directly.
 
 The dashboard shows:
-- backend Deployment desired, ready, available, and updated replicas
-- backend HPA min/max replicas, current/desired replicas, current CPU utilization, and target CPU utilization
-- backend Pods with phase, readiness, restart count, start time, CPU, and memory when metrics are available
-- frontend-only time-series charts for backend replicas and HPA CPU utilization
+- public-backend Deployment desired, ready, available, and updated replicas
+- public-backend HPA min/max replicas, current/desired replicas, current CPU utilization, and target CPU utilization
+- public-backend Pods with phase, readiness, restart count, start time, CPU, and memory when metrics are available
+- frontend-only time-series charts for public-backend replicas and HPA CPU utilization
 
 The dashboard does not add Prometheus, Grafana, another microservice, a database, or any Kubernetes mutation controls. Its chart history is kept only in browser memory and resets when the page refreshes.
 
@@ -621,10 +647,10 @@ Then open the bookstore frontend in the browser and click **Monitoring**. In ano
 ```
 
 Expected behavior:
-- before load: backend has 2 replicas and low CPU
+- before load: public-backend has 2 replicas and low CPU
 - during load: CPU rises above the 50% HPA target
-- backend replicas increase toward `maxReplicas=5`
-- new backend Pods appear in the Pods table
+- public-backend replicas increase toward `maxReplicas=5`
+- new public-backend Pods appear in the Pods table
 - the replicas chart rises from 2 toward 5
 - the CPU chart rises above the target line
 - after load stops: CPU decreases, and after the HPA scale-down delay replicas eventually return to 2
@@ -645,5 +671,5 @@ Screenshot/evidence checklist for the final report:
 - Monitoring page during load
 - replicas chart showing 2 -> 5
 - CPU chart showing utilization rising above target
-- backend Pods table showing new Pods
+- public-backend Pods table showing new Pods
 - Monitoring page after load showing scale-down if captured

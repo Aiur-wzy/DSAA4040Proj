@@ -166,7 +166,7 @@ function MonitoringDashboard({ onBack }) {
         <div>
           <h1>Monitoring / HPA Dashboard</h1>
           <p className="muted">
-            Read-only Kubernetes status for the backend Deployment, HPA, and Pods. Auto-refreshes every 5 seconds.
+            Read-only Kubernetes status for the public-backend Deployment, HPA, and Pods. Auto-refreshes every 5 seconds.
           </p>
         </div>
         <div className="header-actions">
@@ -193,7 +193,7 @@ function MonitoringDashboard({ onBack }) {
       ))}
 
       <div className="monitoring-cards">
-        <MetricCard title="Backend Deployment">
+        <MetricCard title="public-backend Deployment">
           <dl className="metric-grid">
             <dt>Name</dt><dd>{formatValue(deployment.name)}</dd>
             <dt>Desired replicas</dt><dd>{formatValue(deployment.desiredReplicas)}</dd>
@@ -217,7 +217,7 @@ function MonitoringDashboard({ onBack }) {
 
       <div className="monitoring-charts">
         <SimpleLineChart
-          title="Backend Replicas Over Time"
+          title="public-backend Replicas Over Time"
           samples={samples}
           emptyMessage="Replica samples will appear after the first successful refresh."
           lines={[
@@ -238,7 +238,7 @@ function MonitoringDashboard({ onBack }) {
       </div>
 
       <section className="panel">
-        <h2>Backend Pods</h2>
+        <h2>public-backend Pods</h2>
         <div className="table-wrap">
           <table className="pods-table">
             <thead>
@@ -266,7 +266,7 @@ function MonitoringDashboard({ onBack }) {
               ))}
               {!pods.length ? (
                 <tr>
-                  <td colSpan="7" className="muted">No backend Pods reported yet.</td>
+                  <td colSpan="7" className="muted">No public-backend Pods reported yet.</td>
                 </tr>
               ) : null}
             </tbody>

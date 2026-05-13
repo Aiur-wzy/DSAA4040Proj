@@ -8,9 +8,9 @@ from kubernetes.config.config_exception import ConfigException
 router = APIRouter()
 
 NAMESPACE = os.getenv("BOOKSTORE_NAMESPACE", os.getenv("POD_NAMESPACE", "bookstore"))
-BACKEND_DEPLOYMENT = os.getenv("BOOKSTORE_BACKEND_DEPLOYMENT", "backend")
-BACKEND_HPA = os.getenv("BOOKSTORE_BACKEND_HPA", "backend-hpa")
-BACKEND_POD_SELECTOR = os.getenv("BOOKSTORE_BACKEND_POD_SELECTOR", "app=backend")
+BACKEND_DEPLOYMENT = os.getenv("BOOKSTORE_BACKEND_DEPLOYMENT", "public-backend")
+BACKEND_HPA = os.getenv("BOOKSTORE_BACKEND_HPA", "public-backend-hpa")
+BACKEND_POD_SELECTOR = os.getenv("BOOKSTORE_BACKEND_POD_SELECTOR", "app=public-backend")
 METRICS_WARNING = (
     "Metrics API is unavailable. Run ./scripts/k8s-fix-metrics-server.sh "
     "and verify kubectl top pods."
@@ -176,7 +176,7 @@ def _pod_summaries(core_api, metrics_by_pod, warnings):
     try:
         pod_list = core_api.list_namespaced_pod(NAMESPACE, label_selector=BACKEND_POD_SELECTOR)
     except Exception as exc:
-        warnings.append(f"Unable to list backend Pods: {_error_reason(exc)}")
+        warnings.append(f"Unable to list monitored backend Pods: {_error_reason(exc)}")
         return []
 
     pods = []

@@ -11,9 +11,18 @@ source "${SCRIPT_DIR}/lib/k8s.sh"
 NAMESPACE="bookstore"
 POSTGRES_IMAGE="postgres:16"
 NODE_PORT="30080"
-BACKEND_DEPLOYMENT_MANIFEST="${REPO_ROOT}/k8s/backend-deployment.yaml"
+BACKEND_DEPLOYMENTS=(public-backend admin-backend monitoring-backend)
+BACKEND_SELECTORS=(app=public-backend app=admin-backend app=monitoring-backend)
+BACKEND_MANIFESTS=(
+  "${REPO_ROOT}/k8s/public-backend-deployment.yaml"
+  "${REPO_ROOT}/k8s/admin-backend-deployment.yaml"
+  "${REPO_ROOT}/k8s/monitoring-backend-deployment.yaml"
+)
+PUBLIC_BACKEND_DEPLOYMENT_MANIFEST="${REPO_ROOT}/k8s/public-backend-deployment.yaml"
 FRONTEND_DEPLOYMENT_MANIFEST="${REPO_ROOT}/k8s/frontend-deployment.yaml"
 CURRENT_STAGE="preflight checks"
+
+declare -A BACKEND_REPLICAS
 
 trap 'echo "Error: ${CURRENT_STAGE} failed at line ${LINENO}. See the command output above for details." >&2' ERR
 
@@ -106,22 +115,30 @@ preflight() {
   [[ -d "${REPO_ROOT}/k8s" ]] || fail "Required k8s directory not found at ${REPO_ROOT}/k8s"
   [[ -f "${REPO_ROOT}/backend/Dockerfile" ]] || fail "Required backend Dockerfile not found at ${REPO_ROOT}/backend/Dockerfile"
   [[ -f "${REPO_ROOT}/frontend/Dockerfile" ]] || fail "Required frontend Dockerfile not found at ${REPO_ROOT}/frontend/Dockerfile"
-  [[ -f "$BACKEND_DEPLOYMENT_MANIFEST" ]] || fail "Missing backend deployment manifest: $BACKEND_DEPLOYMENT_MANIFEST"
+  [[ -f "$PUBLIC_BACKEND_DEPLOYMENT_MANIFEST" ]] || fail "Missing public backend deployment manifest: $PUBLIC_BACKEND_DEPLOYMENT_MANIFEST"
   [[ -f "$FRONTEND_DEPLOYMENT_MANIFEST" ]] || fail "Missing frontend deployment manifest: $FRONTEND_DEPLOYMENT_MANIFEST"
+  for manifest in "${BACKEND_MANIFESTS[@]}"; do
+    [[ -f "$manifest" ]] || fail "Missing backend deployment manifest: $manifest"
+  done
 
-  BACKEND_DEPLOYMENT="$(manifest_first_value "$BACKEND_DEPLOYMENT_MANIFEST" "name")"
+  BACKEND_IMAGE="$(awk '$1 == "image:" { print $2; exit }' "$PUBLIC_BACKEND_DEPLOYMENT_MANIFEST")"
   FRONTEND_DEPLOYMENT="$(manifest_first_value "$FRONTEND_DEPLOYMENT_MANIFEST" "name")"
-  BACKEND_IMAGE="$(awk '$1 == "image:" { print $2; exit }' "$BACKEND_DEPLOYMENT_MANIFEST")"
   FRONTEND_IMAGE="$(awk '$1 == "image:" { print $2; exit }' "$FRONTEND_DEPLOYMENT_MANIFEST")"
   COMPOSE_BACKEND_IMAGE="$(compose_service_image backend)"
   COMPOSE_FRONTEND_IMAGE="$(compose_service_image frontend)"
+
+  for manifest in "${BACKEND_MANIFESTS[@]}"; do
+    local image
+    image="$(awk '$1 == "image:" { print $2; exit }' "$manifest")"
+    [[ "$image" == "$BACKEND_IMAGE" ]] || fail "Backend split must reuse one image. ${manifest} uses '${image}', expected '${BACKEND_IMAGE}'."
+  done
 
   verify_image_match "backend" "$COMPOSE_BACKEND_IMAGE" "$BACKEND_IMAGE"
   verify_image_match "frontend" "$COMPOSE_FRONTEND_IMAGE" "$FRONTEND_IMAGE"
 
   info "Using Kubernetes command: ${KUBECTL_MODE}"
   info "Using namespace: ${NAMESPACE}"
-  info "Backend deployment/image: ${BACKEND_DEPLOYMENT} -> ${BACKEND_IMAGE}"
+  info "Backend image reused by deployments: ${BACKEND_DEPLOYMENTS[*]} -> ${BACKEND_IMAGE}"
   info "Frontend deployment/image: ${FRONTEND_DEPLOYMENT} -> ${FRONTEND_IMAGE}"
 }
 
@@ -153,28 +170,29 @@ deployment_exists() {
 }
 
 save_replica_counts() {
-  local backend_default
   local frontend_default
-
-  backend_default="$(manifest_replicas "$BACKEND_DEPLOYMENT_MANIFEST" 2)"
   frontend_default="$(manifest_replicas "$FRONTEND_DEPLOYMENT_MANIFEST" 2)"
 
-  if deployment_exists "$BACKEND_DEPLOYMENT"; then
-    BACKEND_REPLICAS="$("${KUBECTL[@]}" get "deployment/${BACKEND_DEPLOYMENT}" -n "$NAMESPACE" -o jsonpath='{.spec.replicas}')"
-  else
-    BACKEND_REPLICAS="$backend_default"
-  fi
+  for i in "${!BACKEND_DEPLOYMENTS[@]}"; do
+    local deployment="${BACKEND_DEPLOYMENTS[$i]}"
+    local default_replicas
+    default_replicas="$(manifest_replicas "${BACKEND_MANIFESTS[$i]}" 1)"
+    if deployment_exists "$deployment"; then
+      BACKEND_REPLICAS[$deployment]="$("${KUBECTL[@]}" get "deployment/${deployment}" -n "$NAMESPACE" -o jsonpath='{.spec.replicas}')"
+    else
+      BACKEND_REPLICAS[$deployment]="$default_replicas"
+    fi
+    BACKEND_REPLICAS[$deployment]="${BACKEND_REPLICAS[$deployment]:-$default_replicas}"
+  done
 
   if deployment_exists "$FRONTEND_DEPLOYMENT"; then
     FRONTEND_REPLICAS="$("${KUBECTL[@]}" get "deployment/${FRONTEND_DEPLOYMENT}" -n "$NAMESPACE" -o jsonpath='{.spec.replicas}')"
   else
     FRONTEND_REPLICAS="$frontend_default"
   fi
-
-  BACKEND_REPLICAS="${BACKEND_REPLICAS:-$backend_default}"
   FRONTEND_REPLICAS="${FRONTEND_REPLICAS:-$frontend_default}"
 
-  info "Saved desired replica counts: ${BACKEND_DEPLOYMENT}=${BACKEND_REPLICAS}, ${FRONTEND_DEPLOYMENT}=${FRONTEND_REPLICAS}"
+  info "Saved desired replica counts: public-backend=${BACKEND_REPLICAS[public-backend]}, admin-backend=${BACKEND_REPLICAS[admin-backend]}, monitoring-backend=${BACKEND_REPLICAS[monitoring-backend]}, ${FRONTEND_DEPLOYMENT}=${FRONTEND_REPLICAS}"
 }
 
 wait_for_pods_gone() {
@@ -200,11 +218,21 @@ wait_for_pods_gone() {
 }
 
 scale_deployments_to_zero() {
-  if deployment_exists "$BACKEND_DEPLOYMENT"; then
-    "${KUBECTL[@]}" scale "deployment/${BACKEND_DEPLOYMENT}" -n "$NAMESPACE" --replicas=0
-    wait_for_pods_gone "app=backend" "backend"
-  else
-    info "Backend deployment ${BACKEND_DEPLOYMENT} does not exist yet; skipping scale-down."
+  for i in "${!BACKEND_DEPLOYMENTS[@]}"; do
+    local deployment="${BACKEND_DEPLOYMENTS[$i]}"
+    local selector="${BACKEND_SELECTORS[$i]}"
+    if deployment_exists "$deployment"; then
+      "${KUBECTL[@]}" scale "deployment/${deployment}" -n "$NAMESPACE" --replicas=0
+      wait_for_pods_gone "$selector" "$deployment"
+    else
+      info "Backend deployment ${deployment} does not exist yet; skipping scale-down."
+    fi
+  done
+
+  # Also retire the legacy shared backend if this cluster was deployed before the split.
+  if deployment_exists backend; then
+    "${KUBECTL[@]}" scale deployment/backend -n "$NAMESPACE" --replicas=0
+    wait_for_pods_gone "app=backend" "legacy backend"
   fi
 
   if deployment_exists "$FRONTEND_DEPLOYMENT"; then
@@ -278,39 +306,58 @@ apply_manifests() {
     "${KUBECTL[@]}" wait --for=condition=complete job/postgres-init -n "$NAMESPACE" --timeout=180s
   fi
 
-  "${KUBECTL[@]}" apply -f k8s/backend-rbac.yaml
-  "${KUBECTL[@]}" apply -f k8s/backend-service.yaml
-  "${KUBECTL[@]}" apply -f k8s/backend-deployment.yaml
+  "${KUBECTL[@]}" apply -f k8s/monitoring-backend-rbac.yaml
+  "${KUBECTL[@]}" apply -f k8s/public-backend-service.yaml
+  "${KUBECTL[@]}" apply -f k8s/admin-backend-service.yaml
+  "${KUBECTL[@]}" apply -f k8s/monitoring-backend-service.yaml
+  "${KUBECTL[@]}" apply -f k8s/public-backend-deployment.yaml
+  "${KUBECTL[@]}" apply -f k8s/admin-backend-deployment.yaml
+  "${KUBECTL[@]}" apply -f k8s/monitoring-backend-deployment.yaml
   "${KUBECTL[@]}" apply -f k8s/frontend-service.yaml
   "${KUBECTL[@]}" apply -f k8s/frontend-deployment.yaml
   "${KUBECTL[@]}" apply -f k8s/ingress.yaml
   "${KUBECTL[@]}" apply -f k8s/hpa.yaml
+
+  "${KUBECTL[@]}" delete hpa backend-hpa -n "$NAMESPACE" --ignore-not-found
+  "${KUBECTL[@]}" delete deployment backend -n "$NAMESPACE" --ignore-not-found
+  "${KUBECTL[@]}" delete service backend-service -n "$NAMESPACE" --ignore-not-found
+  "${KUBECTL[@]}" delete rolebinding bookstore-backend-readonly -n "$NAMESPACE" --ignore-not-found
+  "${KUBECTL[@]}" delete role bookstore-backend-readonly -n "$NAMESPACE" --ignore-not-found
+  "${KUBECTL[@]}" delete serviceaccount bookstore-backend -n "$NAMESPACE" --ignore-not-found
 }
 
 restore_replica_counts() {
-  "${KUBECTL[@]}" scale "deployment/${BACKEND_DEPLOYMENT}" -n "$NAMESPACE" --replicas="$BACKEND_REPLICAS"
+  for deployment in "${BACKEND_DEPLOYMENTS[@]}"; do
+    "${KUBECTL[@]}" scale "deployment/${deployment}" -n "$NAMESPACE" --replicas="${BACKEND_REPLICAS[$deployment]}"
+  done
   "${KUBECTL[@]}" scale "deployment/${FRONTEND_DEPLOYMENT}" -n "$NAMESPACE" --replicas="$FRONTEND_REPLICAS"
 }
 
 wait_for_rollout() {
-  "${KUBECTL[@]}" rollout status "deployment/${BACKEND_DEPLOYMENT}" -n "$NAMESPACE" --timeout=240s
+  for deployment in "${BACKEND_DEPLOYMENTS[@]}"; do
+    "${KUBECTL[@]}" rollout status "deployment/${deployment}" -n "$NAMESPACE" --timeout=240s
+  done
   "${KUBECTL[@]}" rollout status "deployment/${FRONTEND_DEPLOYMENT}" -n "$NAMESPACE" --timeout=240s
 }
 
 verify_running_backend_image() {
-  local backend_pod
-  local found
+  for i in "${!BACKEND_DEPLOYMENTS[@]}"; do
+    local deployment="${BACKEND_DEPLOYMENTS[$i]}"
+    local selector="${BACKEND_SELECTORS[$i]}"
+    local backend_pod
+    local found
 
-  backend_pod="$("${KUBECTL[@]}" get pod -n "$NAMESPACE" -l app=backend -o jsonpath='{.items[0].metadata.name}')"
-  [[ -n "$backend_pod" ]] || fail "Could not find a running backend Pod to verify admin_books.py after rollout."
+    backend_pod="$("${KUBECTL[@]}" get pod -n "$NAMESPACE" -l "$selector" -o jsonpath='{.items[?(@.status.phase=="Running")].metadata.name}' | awk '{print $1}')"
+    [[ -n "$backend_pod" ]] || fail "Could not find a running ${deployment} Pod to verify admin_books.py after rollout."
 
-  found="$("${KUBECTL[@]}" exec -n "$NAMESPACE" "$backend_pod" -- find / -name "admin_books.py" 2>/dev/null || true)"
-  if [[ -z "$found" ]]; then
-    fail "Stale Minikube image detected: backend Pod ${backend_pod} does not contain admin_books.py after loading ${BACKEND_IMAGE}. Scale backend/frontend to 0, remove old same-tag images inside Minikube, reload images, and redeploy."
-  fi
+    found="$("${KUBECTL[@]}" exec -n "$NAMESPACE" "$backend_pod" -- find / -name "admin_books.py" 2>/dev/null || true)"
+    if [[ -z "$found" ]]; then
+      fail "Stale Minikube image detected: ${deployment} Pod ${backend_pod} does not contain admin_books.py after loading ${BACKEND_IMAGE}. Scale backend/frontend to 0, remove old same-tag images inside Minikube, reload images, and redeploy."
+    fi
 
-  info "Verified running backend Pod ${backend_pod} contains admin_books.py:"
-  printf '%s\n' "$found"
+    info "Verified running ${deployment} Pod ${backend_pod} contains admin_books.py:"
+    printf '%s\n' "$found"
+  done
 }
 
 print_summary() {
@@ -318,6 +365,8 @@ print_summary() {
   "${KUBECTL[@]}" get pods -n "$NAMESPACE" -o wide
   printf '\n'
   "${KUBECTL[@]}" get services -n "$NAMESPACE"
+  printf '\n'
+  "${KUBECTL[@]}" get hpa -n "$NAMESPACE"
 
   cat <<SUMMARY
 

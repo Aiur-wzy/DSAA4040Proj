@@ -12,4 +12,10 @@ require_minikube_running
 echo "Using Kubernetes command: ${KUBECTL_MODE}"
 echo "WARNING: This deletes Kubernetes resources in namespace 'bookstore'."
 "${KUBECTL[@]}" delete -f k8s/ --ignore-not-found=true
+"${KUBECTL[@]}" delete hpa backend-hpa -n bookstore --ignore-not-found=true
+"${KUBECTL[@]}" delete deployment backend -n bookstore --ignore-not-found=true
+"${KUBECTL[@]}" delete service backend-service -n bookstore --ignore-not-found=true
+"${KUBECTL[@]}" delete rolebinding bookstore-backend-readonly -n bookstore --ignore-not-found=true
+"${KUBECTL[@]}" delete role bookstore-backend-readonly -n bookstore --ignore-not-found=true
+"${KUBECTL[@]}" delete serviceaccount bookstore-backend -n bookstore --ignore-not-found=true
 "${KUBECTL[@]}" delete configmap postgres-init-sql -n bookstore --ignore-not-found=true

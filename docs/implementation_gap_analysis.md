@@ -8,106 +8,106 @@ The repository implements a functional three-tier DSAA4040 cloud-native online b
 
 ### Application Features
 
-- [x] Book catalog display and search/filter implemented  
+- [x] Book catalog display and search/filter implemented
   Evidence: `backend/app/routes/books.py` (`GET /api/books?search=...`), `frontend/src/api.js`, `frontend/src/components/BookList.jsx`
-- [x] Cart add/update/remove/read operations implemented for a demo user  
+- [x] Cart add/update/remove/read operations implemented for a demo user
   Evidence: `backend/app/routes/cart.py`, `backend/app/schemas.py`, `frontend/src/components/Cart.jsx`
-- [x] Place-order flow creates order records, order items, deducts stock, and clears cart  
+- [x] Place-order flow creates order records, order items, deducts stock, and clears cart
   Evidence: `backend/app/routes/orders.py`, `database/place_order.sql`, `frontend/src/App.jsx`
-- [x] Order history display implemented  
+- [x] Order history display implemented
   Evidence: `backend/app/routes/orders.py` (`GET /api/orders`), `frontend/src/components/OrderHistory.jsx`
 
 ### Backend API
 
-- [x] FastAPI app registers all required routers under `/api`  
+- [x] FastAPI app registers all required routers under `/api`
   Evidence: `backend/app/main.py`
-- [x] Backend health endpoint implemented  
+- [x] Backend health endpoint implemented
   Evidence: `backend/app/routes/health.py`, endpoint `/api/health`
-- [x] Database health endpoint implemented  
+- [x] Database health endpoint implemented
   Evidence: `backend/app/routes/health.py`, endpoint `/api/health/db`
-- [x] PostgreSQL connection uses environment-based configuration  
+- [x] PostgreSQL connection uses environment-based configuration
   Evidence: `backend/app/db.py`, `docker-compose.yml`, `k8s/configmap.yaml`, `k8s/secret.yaml`
-- [x] Transactional order placement uses row locking and commits only after all order steps succeed  
+- [x] Transactional order placement uses row locking and commits only after all order steps succeed
   Evidence: `backend/app/routes/orders.py` (`FOR UPDATE OF b`, stock checks, insert/update/delete in one connection transaction)
 
 ### Frontend UI
 
-- [x] React UI calls backend APIs for health, catalog, cart, orders, and place order  
+- [x] React UI calls backend APIs for health, catalog, cart, orders, and place order
   Evidence: `frontend/src/api.js`, `frontend/src/App.jsx`
-- [x] Frontend has separate components for book list, cart, order history, and status messages  
+- [x] Frontend has separate components for book list, cart, order history, and status messages
   Evidence: `frontend/src/components/BookList.jsx`, `frontend/src/components/Cart.jsx`, `frontend/src/components/OrderHistory.jsx`, `frontend/src/components/StatusMessage.jsx`
-- [x] Nginx serves the SPA and proxies `/api/` to the backend service name  
+- [x] Nginx serves the SPA and proxies `/api/` to the backend service name
   Evidence: `frontend/nginx.conf`
 
 ### Database
 
-- [x] PostgreSQL schema contains `books`, `carts`, `orders`, and `order_items` tables  
+- [x] PostgreSQL schema contains `books`, `carts`, `orders`, and `order_items` tables
   Evidence: `database/schema.sql`
-- [x] Seed catalog data exists  
+- [x] Seed catalog data exists
   Evidence: `database/seed.sql`
-- [x] SQL-level order transaction script exists  
+- [x] SQL-level order transaction script exists
   Evidence: `database/place_order.sql`
-- [x] Basic SQL validation script exists  
+- [x] Basic SQL validation script exists
   Evidence: `database/test.sql`
 
 ### Docker Compose
 
-- [x] Full-stack local Compose deployment exists with db, backend, and frontend services  
+- [x] Full-stack local Compose deployment exists with db, backend, and frontend services
   Evidence: `docker-compose.yml`
-- [x] Backend and frontend images are built with stable local tags used by Kubernetes too  
+- [x] Backend and frontend images are built with stable local tags used by Kubernetes too
   Evidence: `docker-compose.yml`, `backend/Dockerfile`, `frontend/Dockerfile`
-- [x] Compose database initialization mounts schema and seed SQL into `/docker-entrypoint-initdb.d/`  
+- [x] Compose database initialization mounts schema and seed SQL into `/docker-entrypoint-initdb.d/`
   Evidence: `docker-compose.yml`
-- [x] Compose backend waits for PostgreSQL health before starting  
+- [x] Compose backend waits for PostgreSQL health before starting
   Evidence: `docker-compose.yml`
 
 ### Kubernetes
 
-- [x] Namespace manifest exists  
+- [x] Namespace manifest exists
   Evidence: `k8s/namespace.yaml`
-- [x] ConfigMap and Secret manifests exist  
+- [x] ConfigMap and Secret manifests exist
   Evidence: `k8s/configmap.yaml`, `k8s/secret.yaml`
-- [x] PostgreSQL Deployment, PVC, and Service exist  
+- [x] PostgreSQL Deployment, PVC, and Service exist
   Evidence: `k8s/postgres-deployment.yaml`, `k8s/postgres-service.yaml`
-- [x] Backend Deployment and Service exist  
-  Evidence: `k8s/backend-deployment.yaml`, `k8s/backend-service.yaml`
-- [x] Frontend Deployment and NodePort Service exist  
+- [x] Split backend Deployments and Services exist
+  Evidence: `k8s/public-backend-deployment.yaml`, `k8s/public-backend-service.yaml`, `k8s/admin-backend-deployment.yaml`, `k8s/admin-backend-service.yaml`, `k8s/monitoring-backend-deployment.yaml`, `k8s/monitoring-backend-service.yaml`
+- [x] Frontend Deployment and NodePort Service exist
   Evidence: `k8s/frontend-deployment.yaml`, `k8s/frontend-service.yaml`
-- [x] Ingress manifest exists for `bookstore.local` and `/api` routing  
+- [x] Ingress manifest exists for `bookstore.local` and `/api` routing
   Evidence: `k8s/ingress.yaml`
-- [x] Backend HPA manifest exists  
+- [x] Backend HPA manifest exists
   Evidence: `k8s/hpa.yaml`
-- [x] PostgreSQL init Job exists and uses a SQL ConfigMap created by the deploy script  
+- [x] PostgreSQL init Job exists and uses a SQL ConfigMap created by the deploy script
   Evidence: `k8s/postgres-init-job.yaml`, `scripts/k8s-rebuild-and-deploy.sh`
-- [x] Backend and frontend readiness/liveness probes exist  
-  Evidence: `k8s/backend-deployment.yaml`, `k8s/frontend-deployment.yaml`
-- [x] PostgreSQL readiness probe exists  
+- [x] Backend and frontend readiness/liveness probes exist
+  Evidence: `k8s/public-backend-deployment.yaml`, `k8s/admin-backend-deployment.yaml`, `k8s/monitoring-backend-deployment.yaml`, `k8s/frontend-deployment.yaml`
+- [x] PostgreSQL readiness probe exists
   Evidence: `k8s/postgres-deployment.yaml`
 
 ### Scripts and Testing
 
-- [x] Docker Compose helper scripts exist  
+- [x] Docker Compose helper scripts exist
   Evidence: `scripts/compose-up.sh`, `scripts/compose-down.sh`, `scripts/compose-status.sh`, `scripts/compose-logs.sh`
-- [x] API smoke-test script covers health, books, cart, order placement, and orders  
+- [x] API smoke-test script covers health, books, cart, order placement, and orders
   Evidence: `scripts/test-api.sh`
-- [x] Kubernetes rebuild/load/apply/restart workflow exists and handles stale local images by loading images and restarting deployments  
+- [x] Kubernetes rebuild/load/apply/restart workflow exists and handles stale local images by loading images and restarting deployments
   Evidence: `scripts/k8s-rebuild-and-deploy.sh`
-- [x] Kubernetes NodePort smoke-test script exists  
+- [x] Kubernetes NodePort smoke-test script exists
   Evidence: `scripts/k8s-test-local.sh`
-- [x] Kubernetes status, cleanup, reset, monitoring, and performance helper scripts exist  
+- [x] Kubernetes status, cleanup, reset, monitoring, and performance helper scripts exist
   Evidence: `scripts/k8s-status.sh`, `scripts/k8s-cleanup.sh`, `scripts/k8s-reset-local.sh`, `scripts/monitor-k8s.sh`, `scripts/perf-test.sh`
-- [x] Shared Kubernetes helper falls back to `minikube kubectl --` when standalone `kubectl` is unavailable  
+- [x] Shared Kubernetes helper falls back to `minikube kubectl --` when standalone `kubectl` is unavailable
   Evidence: `scripts/lib/k8s.sh`
 
 ### Documentation
 
-- [x] Main README explains architecture, quick-start workflows, Minikube image loading, stale-image restarts, NodePort testing, and external demo notes  
+- [x] Main README explains architecture, quick-start workflows, Minikube image loading, stale-image restarts, NodePort testing, and external demo notes
   Evidence: `README.md`
-- [x] Kubernetes README describes manifests and operational commands  
+- [x] Kubernetes README describes manifests and operational commands
   Evidence: `k8s/README.md`
-- [x] Backend, frontend, and database README files summarize component usage  
+- [x] Backend, frontend, and database README files summarize component usage
   Evidence: `backend/README.md`, `frontend/README.md`, `database/README.md`
-- [x] Final report scaffold exists  
+- [x] Final report scaffold exists
   Evidence: `report/final_report.md`
 
 ## 3. Partially Completed Features
@@ -121,28 +121,28 @@ The repository implements a functional three-tier DSAA4040 cloud-native online b
     ```
   - Files updated: `scripts/k8s-expose-demo.sh`, `README.md`, `k8s/README.md`.
 
-- [ ] Ingress usability in Minikube/cloud demo  
+- [ ] Ingress usability in Minikube/cloud demo
   - What exists now: `k8s/ingress.yaml` routes `bookstore.local` to frontend and `/api` to backend.
   - What is missing: runtime proof that the ingress addon is enabled, host DNS/`/etc/hosts` is configured, and access works from the final demo environment.
   - Files needing changes: `README.md`, `k8s/README.md`, `report/final_report.md`.
 
-- [ ] HPA is declared but not proven under load  
-  - What exists now: `k8s/hpa.yaml` targets backend CPU utilization; backend resources are set in `k8s/backend-deployment.yaml`.
+- [ ] HPA is declared but not proven under load
+  - What exists now: `k8s/hpa.yaml` targets public-backend CPU utilization; backend resources are set in the split backend Deployment manifests.
   - What is missing: metrics-server enablement and load-test evidence showing HPA metrics or scaling behavior.
   - Files needing changes: `report/final_report.md`; optionally `scripts/perf-test.sh` or a new HPA verification script.
 
-- [ ] Database initialization is automated but reset behavior is risky  
+- [ ] Database initialization is automated but reset behavior is risky
   - What exists now: Compose init mounts `schema.sql` and `seed.sql`; Kubernetes init Job runs SQL from `postgres-init-sql` ConfigMap.
   - What is missing: `database/schema.sql` starts with `DROP TABLE IF EXISTS`, so re-running the Kubernetes init Job with `FORCE_POSTGRES_INIT=1` can delete orders/cart data. Seed SQL is not idempotent if schema is changed to preserve tables.
   - Files needing changes: `database/schema.sql`, `database/seed.sql`, `k8s/postgres-init-job.yaml`, `scripts/k8s-rebuild-and-deploy.sh`, docs.
 
-- [ ] Testing exists but final evidence is not collected  
+- [ ] Testing exists but final evidence is not collected
   - What exists now: scripts exist for API, Kubernetes NodePort, monitoring, and performance.
   - What is missing: captured command outputs, screenshots, latency/performance summary, HPA output, and Ingress/public demo proof in the report.
   - Files needing changes: `report/final_report.md` and possibly an `evidence/` directory.
 
-- [ ] Frontend API routing works for current Compose/Kubernetes paths but is tightly coupled to service aliases  
-  - What exists now: browser calls relative `/api/...`; Nginx proxies to `backend-service:8000`; Compose gives backend the `backend-service` network alias.
+- [ ] Frontend API routing works for current Compose/Kubernetes paths but is tightly coupled to service aliases
+  - What exists now: browser calls relative `/api/...`; Kubernetes Nginx proxies by path to `public-backend-service:8000`, `admin-backend-service:8000`, and `monitoring-backend-service:8000`; Compose keeps the `backend-service` network alias for local single-backend development.
   - What is missing: clearer documentation of why this works in both Compose and Kubernetes, and a dev-mode fallback using `VITE_API_BASE_URL` or Vite proxy if running frontend outside Nginx.
   - Files needing changes: `frontend/README.md`, `README.md`, optionally `frontend/vite.config.js`.
 
