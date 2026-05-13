@@ -80,9 +80,39 @@ The automated workflow builds these stable tags on the host Docker daemon and lo
 ./scripts/k8s-rebuild-and-deploy.sh
 ```
 
+## Full Kubernetes Update Workflow
+
+For major application or Kubernetes changes, run from the repository root:
+
+```bash
+./scripts/k8s-full-update.sh
+```
+
+The full workflow rebuilds and deploys the split-backend bookstore system, repairs/checks `metrics-server`, repairs/checks `ingress-nginx`, verifies NodePort and Ingress routes, runs smoke tests, prints cluster status, and shows the next demo commands.
+
+The focused scripts remain available when you only need one piece of the workflow:
+
+- `./scripts/k8s-rebuild-and-deploy.sh` rebuilds and applies the app.
+- `./scripts/k8s-fix-metrics-server.sh` repairs/checks HPA metrics.
+- `./scripts/k8s-fix-ingress.sh` repairs/checks Ingress.
+
+Public browser demos still use the existing NodePort-to-public-port forwarding script:
+
+```bash
+PUBLIC_PORT=3000 NODE_PORT=30080 ./scripts/k8s-expose-demo.sh
+```
+
+Ingress tests use the Minikube IP with the `bookstore.local` host header:
+
+```bash
+curl -H "Host: bookstore.local" http://$(minikube ip)/api/books
+```
+
+If the ingress addon fails with `ImagePullBackOff`, `ErrImagePull`, or `manifest unknown` for `kube-webhook-certgen` or `nginx-ingress-controller`, run `./scripts/k8s-fix-ingress.sh`. This is caused by bad tag+digest images from the Minikube addon mirror; the script patches ingress-nginx to Aliyun tag-only images and verifies the controller.
+
 ## Recommended local Minikube workflow
 
-Run from the repository root for first-time deployment to an already running Minikube profile and repeated update deployments:
+Run from the repository root for focused app-only deployment to an already running Minikube profile and repeated update deployments:
 
 ```bash
 ./scripts/k8s-rebuild-and-deploy.sh
@@ -117,10 +147,10 @@ The public exposure behavior is unchanged: only the frontend NodePort is exposed
 
 ## Ingress access
 
-Enable the Minikube ingress addon and map `bookstore.local` to the Minikube IP:
+Repair/check the Minikube ingress addon and map `bookstore.local` to the Minikube IP:
 
 ```bash
-minikube addons enable ingress
+./scripts/k8s-fix-ingress.sh
 minikube ip
 ```
 
@@ -184,7 +214,7 @@ Therefore the dashboard reports the public-backend Deployment, public-backend HP
 
 ```bash
 minikube kubectl -- get deploy,svc,hpa,ingress -n bookstore
-minikube kubectl -- get endpoints -n bookstore public-backend-service admin-backend-service monitoring-backend-service
+minikube kubectl -- get endpointslices -n bookstore
 minikube kubectl -- auth can-i get deployments -n bookstore --as=system:serviceaccount:bookstore:bookstore-monitoring-backend
 minikube kubectl -- auth can-i get pods.metrics.k8s.io -n bookstore --as=system:serviceaccount:bookstore:bookstore-monitoring-backend
 ```
