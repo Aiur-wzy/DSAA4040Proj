@@ -6,8 +6,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/k8s.sh
 source "${SCRIPT_DIR}/lib/k8s.sh"
 
-CNPG_VERSION="${CNPG_VERSION:-1.24.1}"
-CNPG_MANIFEST_URL="${CNPG_MANIFEST_URL:-https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-${CNPG_VERSION}/releases/cnpg-${CNPG_VERSION}.yaml}"
+CNPG_MINOR="${CNPG_MINOR:-1.24}"
+CNPG_VERSION="${CNPG_VERSION:-1.24.4}"
+CNPG_MANIFEST_URL="${CNPG_MANIFEST_URL:-https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-${CNPG_MINOR}/releases/cnpg-${CNPG_VERSION}.yaml}"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 info() { echo "INFO: $*"; }
