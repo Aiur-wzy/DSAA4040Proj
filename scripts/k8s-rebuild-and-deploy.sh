@@ -20,6 +20,8 @@ DB_SERVICE="postgres-service"
 if [[ "$DB_MODE" == "ha" ]]; then
   DB_SERVICE="bookstore-postgres-rw"
 fi
+COMMAND="${1:-all}"
+VALID_COMMANDS=(all install-cnpg apply-ha-database init-db deploy-app verify-app)
 BACKEND_DEPLOYMENTS=(public-backend admin-backend monitoring-backend)
 BACKEND_SELECTORS=(app=public-backend app=admin-backend app=monitoring-backend)
 declare -A SAFE_DEFAULT_REPLICAS=(
@@ -153,7 +155,10 @@ preflight() {
 
   info "Using Kubernetes command: ${KUBECTL_MODE}"
   info "Using namespace: ${NAMESPACE}"
-  info "DB_MODE=${DB_MODE}; backend DB service=${DB_SERVICE}; HA enabled=$([[ "$DB_MODE" == "ha" ]] && echo yes || echo no)"
+  info "DB_MODE=${DB_MODE}; backend DB service=${DB_SERVICE}; HA enabled=$([[ "$DB_MODE" == "ha" ]] && echo yes || echo no); command=${COMMAND}"
+  if [[ "$DB_MODE" == "ha" ]]; then
+    info "Warning: DB_MODE=ha runs 3 PostgreSQL instances plus the app, ingress, and metrics-server. A single-node Minikube cluster with 4GB memory can be unstable; use 6GB+ memory if available."
+  fi
   info "Backend image reused by deployments: ${BACKEND_DEPLOYMENTS[*]} -> ${BACKEND_IMAGE}"
   info "Frontend deployment/image: ${FRONTEND_DEPLOYMENT} -> ${FRONTEND_IMAGE}"
 }
@@ -249,6 +254,15 @@ wait_for_pods_gone() {
   fail "Timed out waiting for old ${description} Pods to terminate before replacing same-tag images. Remaining Pods: ${pods_display}"
 }
 
+disable_hpa_before_image_replacement() {
+  if "${KUBECTL[@]}" get hpa public-backend-hpa -n "$NAMESPACE" >/dev/null 2>&1; then
+    info "Deleting public-backend-hpa before image replacement so HPA cannot recreate public-backend Pods with the old same-tag image."
+    "${KUBECTL[@]}" delete hpa public-backend-hpa -n "$NAMESPACE" --ignore-not-found
+  else
+    info "public-backend-hpa is not present; no HPA can recreate public-backend during image replacement."
+  fi
+}
+
 scale_deployments_to_zero() {
   for i in "${!BACKEND_DEPLOYMENTS[@]}"; do
     local deployment="${BACKEND_DEPLOYMENTS[$i]}"
@@ -327,7 +341,8 @@ print_init_job_diagnostics() {
   info "${init_job_name} did not complete before the timeout; collecting diagnostics..."
   "${KUBECTL[@]}" describe job "$init_job_name" -n "$NAMESPACE" || true
   "${KUBECTL[@]}" describe pod -n "$NAMESPACE" -l "job-name=${init_job_name}" || true
-  "${KUBECTL[@]}" logs -n "$NAMESPACE" -l "job-name=${init_job_name}" --tail=100 || true
+  "${KUBECTL[@]}" logs -n "$NAMESPACE" -l "job-name=${init_job_name}" --all-containers=true --tail=200 || true
+  "${KUBECTL[@]}" get events -n "$NAMESPACE" --sort-by=.lastTimestamp || true
 }
 
 wait_for_init_job_complete() {
@@ -339,6 +354,165 @@ wait_for_init_job_complete() {
     fi
     return 1
   fi
+}
+
+cnpg_client_pod() {
+  "${KUBECTL[@]}" get pod -n "$NAMESPACE" -l cnpg.io/cluster=bookstore-postgres \
+    -o jsonpath='{.items[?(@.status.phase=="Running")].metadata.name}' 2>/dev/null | awk '{print $1}'
+}
+
+ha_schema_initialized() {
+  local pod
+  local db_user
+  local db_password
+  local table_count
+
+  pod="$(cnpg_client_pod)"
+  if [[ -z "$pod" ]]; then
+    info "Could not find a running CloudNativePG Pod to check HA schema; init Job decision will use Job state."
+    return 1
+  fi
+
+  db_user="$("${KUBECTL[@]}" get secret bookstore-secret -n "$NAMESPACE" -o jsonpath='{.data.DB_USER}' 2>/dev/null | base64 --decode || true)"
+  db_password="$("${KUBECTL[@]}" get secret bookstore-secret -n "$NAMESPACE" -o jsonpath='{.data.DB_PASSWORD}' 2>/dev/null | base64 --decode || true)"
+  db_user="${db_user:-bookstore}"
+  if [[ -z "$db_password" ]]; then
+    info "Could not read bookstore-secret DB_PASSWORD to check HA schema; init Job decision will use Job state."
+    return 1
+  fi
+
+  table_count="$("${KUBECTL[@]}" exec -n "$NAMESPACE" "$pod" -- env PGPASSWORD="$db_password" \
+    psql -h "$DB_SERVICE" -p 5432 -U "$db_user" -d bookstore -tAc \
+    "select count(*) from information_schema.tables where table_schema='public' and table_name in ('books','orders','order_items','carts');" 2>/dev/null | tr -d '[:space:]' || true)"
+
+  if [[ "$table_count" == "4" ]]; then
+    info "HA database already contains books/orders/order_items/carts; skipping postgres-init-ha. Set FORCE_POSTGRES_INIT=1 to recreate the init Job."
+    return 0
+  fi
+
+  info "HA schema check found ${table_count:-0}/4 expected tables; init Job is required."
+  return 1
+}
+
+run_init_job_if_needed() {
+  local init_job_name="$1"
+  local succeeded
+
+  if [[ "$init_job_name" == "postgres-init-ha" && "${FORCE_POSTGRES_INIT:-0}" != "1" ]] && ha_schema_initialized; then
+    return 0
+  fi
+
+  if "${KUBECTL[@]}" get job "$init_job_name" -n "$NAMESPACE" >/dev/null 2>&1; then
+    succeeded="$("${KUBECTL[@]}" get job "$init_job_name" -n "$NAMESPACE" -o jsonpath='{.status.succeeded}' 2>/dev/null || true)"
+    if [[ "$succeeded" == "1" && "${FORCE_POSTGRES_INIT:-0}" != "1" ]]; then
+      info "${init_job_name} Job already completed; database init will not be rerun. Set FORCE_POSTGRES_INIT=1 to recreate it."
+    else
+      if [[ "${FORCE_POSTGRES_INIT:-0}" != "1" ]]; then
+        info "${init_job_name} exists but has not completed. Leaving it in place because FORCE_POSTGRES_INIT is not set; delete/fix it manually or rerun with FORCE_POSTGRES_INIT=1 after reviewing diagnostics."
+        print_init_job_diagnostics "$init_job_name"
+        return 1
+      fi
+      info "Recreating ${init_job_name} Job because FORCE_POSTGRES_INIT=1 was set. This may reset demo data depending on the SQL files."
+      "${KUBECTL[@]}" delete job "$init_job_name" -n "$NAMESPACE" --ignore-not-found
+      apply_init_job_manifest "$init_job_name"
+      wait_for_init_job_complete "$init_job_name"
+    fi
+  else
+    info "${init_job_name} Job does not exist; creating it now. Set FORCE_POSTGRES_INIT=1 on later runs to force recreation."
+    apply_init_job_manifest "$init_job_name"
+    wait_for_init_job_complete "$init_job_name"
+  fi
+}
+
+apply_namespace_and_init_sql_config() {
+  cd "$REPO_ROOT"
+
+  "${KUBECTL[@]}" apply -f k8s/namespace.yaml
+  "${KUBECTL[@]}" wait --for=jsonpath='{.status.phase}'=Active "namespace/${NAMESPACE}" --timeout=60s
+
+  info "Creating/updating postgres-init-sql ConfigMap with keys expected by postgres-init Job: 01-schema.sql and 02-seed.sql..."
+  "${KUBECTL[@]}" create configmap postgres-init-sql \
+    --from-file=01-schema.sql=database/schema.sql \
+    --from-file=02-seed.sql=database/seed.sql \
+    -n "$NAMESPACE" \
+    --dry-run=client -o yaml | "${KUBECTL[@]}" apply -f -
+
+  "${KUBECTL[@]}" apply -f k8s/secret.yaml
+}
+
+configure_ha_database() {
+  cd "$REPO_ROOT"
+
+  info "Configuring bookstore-config for CloudNativePG HA service ${DB_SERVICE}..."
+  "${KUBECTL[@]}" create configmap bookstore-config \
+    --from-literal=DB_MODE=ha \
+    --from-literal=DB_HOST="${DB_SERVICE}" \
+    --from-literal=DB_WRITE_HOST="${DB_SERVICE}" \
+    --from-literal=DB_READ_HOST=bookstore-postgres-ro \
+    --from-literal=DB_PORT=5432 \
+    --from-literal=DB_NAME=bookstore \
+    --from-literal=APP_USER_ID=demo-user \
+    -n "$NAMESPACE" --dry-run=client -o yaml | "${KUBECTL[@]}" apply -f -
+  if deployment_exists postgres; then
+    info "DB_MODE=ha selected; scaling legacy single PostgreSQL Deployment to 0 without deleting its PVC."
+    "${KUBECTL[@]}" scale deployment/postgres -n "$NAMESPACE" --replicas=0
+  fi
+  "${KUBECTL[@]}" apply -f k8s/postgres-ha/app-secret.yaml
+  "${KUBECTL[@]}" apply -f k8s/postgres-ha/cluster.yaml
+  info "Waiting for CloudNativePG Cluster/bookstore-postgres to report Ready=True..."
+  "${KUBECTL[@]}" wait --for=condition=Ready cluster/bookstore-postgres -n "$NAMESPACE" --timeout=300s
+}
+
+configure_single_database() {
+  cd "$REPO_ROOT"
+
+  "${KUBECTL[@]}" apply -f k8s/configmap.yaml
+  "${KUBECTL[@]}" apply -f k8s/postgres-service.yaml
+  "${KUBECTL[@]}" apply -f k8s/postgres-deployment.yaml
+
+  info "Waiting for PostgreSQL readiness before the init Job..."
+  "${KUBECTL[@]}" wait --for=condition=ready pod -l app=postgres -n "$NAMESPACE" --timeout=180s
+}
+
+run_database_init() {
+  if [[ "$DB_MODE" == "ha" ]]; then
+    run_init_job_if_needed postgres-init-ha
+  else
+    run_init_job_if_needed postgres-init
+  fi
+}
+
+apply_app_manifests_only() {
+  cd "$REPO_ROOT"
+
+  "${KUBECTL[@]}" apply -f k8s/monitoring-backend-rbac.yaml
+  "${KUBECTL[@]}" apply -f k8s/public-backend-service.yaml
+  "${KUBECTL[@]}" apply -f k8s/admin-backend-service.yaml
+  "${KUBECTL[@]}" apply -f k8s/monitoring-backend-service.yaml
+  "${KUBECTL[@]}" apply -f k8s/public-backend-deployment.yaml
+  "${KUBECTL[@]}" apply -f k8s/admin-backend-deployment.yaml
+  "${KUBECTL[@]}" apply -f k8s/monitoring-backend-deployment.yaml
+  "${KUBECTL[@]}" apply -f k8s/frontend-service.yaml
+  "${KUBECTL[@]}" apply -f k8s/frontend-deployment.yaml
+  "${KUBECTL[@]}" apply -f k8s/ingress.yaml
+  "${KUBECTL[@]}" apply -f k8s/hpa.yaml
+
+  "${KUBECTL[@]}" delete hpa backend-hpa -n "$NAMESPACE" --ignore-not-found
+  "${KUBECTL[@]}" delete deployment backend -n "$NAMESPACE" --ignore-not-found
+  "${KUBECTL[@]}" delete service backend-service -n "$NAMESPACE" --ignore-not-found
+  "${KUBECTL[@]}" delete rolebinding bookstore-backend-readonly -n "$NAMESPACE" --ignore-not-found
+  "${KUBECTL[@]}" delete role bookstore-backend-readonly -n "$NAMESPACE" --ignore-not-found
+  "${KUBECTL[@]}" delete serviceaccount bookstore-backend -n "$NAMESPACE" --ignore-not-found
+}
+
+apply_ha_database_only() {
+  apply_namespace_and_init_sql_config
+  configure_ha_database
+}
+
+apply_ha_init_only() {
+  apply_ha_database_only
+  run_database_init
 }
 
 apply_manifests() {
@@ -385,21 +559,7 @@ apply_manifests() {
     init_job_name="postgres-init"
   fi
 
-  if "${KUBECTL[@]}" get job "$init_job_name" -n "$NAMESPACE" >/dev/null 2>&1; then
-    succeeded="$("${KUBECTL[@]}" get job "$init_job_name" -n "$NAMESPACE" -o jsonpath='{.status.succeeded}' 2>/dev/null || true)"
-    if [[ "$succeeded" == "1" && "${FORCE_POSTGRES_INIT:-0}" != "1" ]]; then
-      info "${init_job_name} Job already completed; database init will not be rerun. Set FORCE_POSTGRES_INIT=1 to recreate it."
-    else
-      info "Recreating ${init_job_name} Job because it has not completed or FORCE_POSTGRES_INIT=1 was set. This may reset demo data depending on the SQL files."
-      "${KUBECTL[@]}" delete job "$init_job_name" -n "$NAMESPACE" --ignore-not-found
-      apply_init_job_manifest "$init_job_name"
-      wait_for_init_job_complete "$init_job_name"
-    fi
-  else
-    info "${init_job_name} Job does not exist; creating it now. Set FORCE_POSTGRES_INIT=1 on later runs to force recreation."
-    apply_init_job_manifest "$init_job_name"
-    wait_for_init_job_complete "$init_job_name"
-  fi
+  run_init_job_if_needed "$init_job_name"
 
   "${KUBECTL[@]}" apply -f k8s/monitoring-backend-rbac.yaml
   "${KUBECTL[@]}" apply -f k8s/public-backend-service.yaml
@@ -419,6 +579,15 @@ apply_manifests() {
   "${KUBECTL[@]}" delete rolebinding bookstore-backend-readonly -n "$NAMESPACE" --ignore-not-found
   "${KUBECTL[@]}" delete role bookstore-backend-readonly -n "$NAMESPACE" --ignore-not-found
   "${KUBECTL[@]}" delete serviceaccount bookstore-backend -n "$NAMESPACE" --ignore-not-found
+}
+
+force_app_rollout_restart() {
+  local deployments=("${BACKEND_DEPLOYMENTS[@]}" "$FRONTEND_DEPLOYMENT")
+  for deployment in "${deployments[@]}"; do
+    if deployment_exists "$deployment"; then
+      "${KUBECTL[@]}" rollout restart "deployment/${deployment}" -n "$NAMESPACE"
+    fi
+  done
 }
 
 restore_replica_counts() {
@@ -447,7 +616,11 @@ verify_running_backend_image() {
 
     found="$("${KUBECTL[@]}" exec -n "$NAMESPACE" "$backend_pod" -- find / -name "admin_books.py" 2>/dev/null || true)"
     if [[ -z "$found" ]]; then
-      fail "Stale Minikube image detected: ${deployment} Pod ${backend_pod} does not contain admin_books.py after loading ${BACKEND_IMAGE}. Scale backend/frontend to 0, remove old same-tag images inside Minikube, reload images, and redeploy."
+      info "Stale image diagnostics for ${deployment}/${backend_pod}:"
+      "${KUBECTL[@]}" get pod "$backend_pod" -n "$NAMESPACE" -o jsonpath='{range .status.containerStatuses[*]}container={.name} image={.image} imageID={.imageID}{"\n"}{end}' || true
+      "${KUBECTL[@]}" describe pod "$backend_pod" -n "$NAMESPACE" || true
+      minikube ssh -- docker images "${BACKEND_IMAGE%:*}" || true
+      fail "Stale Minikube image detected: ${deployment} Pod ${backend_pod} does not contain admin_books.py after loading ${BACKEND_IMAGE}. This workflow deletes public-backend-hpa before replacement, removes same-tag Minikube images, reloads images, forces rollout restart, and uses imagePullPolicy=Never; review diagnostics above for imageID/runtime cache problems."
     fi
 
     info "Verified running ${deployment} Pod ${backend_pod} contains admin_books.py:"
@@ -475,16 +648,79 @@ If you need public browser access for the demo, continue using the existing ipta
 SUMMARY
 }
 
+main_all() {
+  run_stage "[1/12] Building backend image..." build_backend
+  run_stage "[2/12] Verifying backend image contents..." verify_backend_host_image
+  run_stage "[3/12] Building frontend image..." build_frontend
+  run_stage "[4/12] Saving current replica counts..." save_replica_counts
+  run_stage "[5/12] Disabling HPA before replacing stable tags..." disable_hpa_before_image_replacement
+  run_stage "[6/12] Scaling backend/frontend to zero before replacing stable tags..." scale_deployments_to_zero
+  run_stage "[7/12] Removing old same-tag images inside Minikube..." remove_old_minikube_images
+  run_stage "[8/12] Loading fresh images into Minikube..." load_images
+  run_stage "[9/12] Applying Kubernetes manifests..." apply_manifests
+  run_stage "[10/12] Forcing app rollout restart after image load..." force_app_rollout_restart
+  run_stage "[11/12] Restoring replica counts and waiting for rollout..." restore_replica_counts
+  wait_for_rollout
+  run_stage "[12/12] Verifying running backend image contents..." verify_running_backend_image
+  print_summary
+}
+
 preflight
-run_stage "[1/10] Building backend image..." build_backend
-run_stage "[2/10] Verifying backend image contents..." verify_backend_host_image
-run_stage "[3/10] Building frontend image..." build_frontend
-run_stage "[4/10] Saving current replica counts..." save_replica_counts
-run_stage "[5/10] Scaling backend/frontend to zero before replacing stable tags..." scale_deployments_to_zero
-run_stage "[6/10] Removing old same-tag images inside Minikube..." remove_old_minikube_images
-run_stage "[7/10] Loading fresh images into Minikube..." load_images
-run_stage "[8/10] Applying Kubernetes manifests..." apply_manifests
-run_stage "[9/10] Restoring replica counts and waiting for rollout..." restore_replica_counts
-wait_for_rollout
-run_stage "[10/10] Verifying running backend image contents..." verify_running_backend_image
-print_summary
+if [[ "$DB_MODE" == "ha" && "$COMMAND" == "all" && "${HA_ALLOW_ALL_IN_ONE:-0}" != "1" ]]; then
+  cat >&2 <<HA_PLAN
+Error: DB_MODE=ha no longer runs the heavy all-in-one workflow by default.
+Run the HA deployment in smaller stages to reduce pressure on resource-limited single-node Minikube clusters:
+  DB_MODE=ha ${0} install-cnpg
+  DB_MODE=ha ${0} apply-ha-database
+  DB_MODE=ha ${0} init-db
+  DB_MODE=ha ${0} deploy-app
+  DB_MODE=ha ${0} verify-app
+
+If you intentionally want the old combined path, rerun with HA_ALLOW_ALL_IN_ONE=1.
+HA_PLAN
+  exit 1
+fi
+
+case "$COMMAND" in
+  all)
+    main_all
+    ;;
+  install-cnpg)
+    [[ "$DB_MODE" == "ha" ]] || fail "install-cnpg command is only valid with DB_MODE=ha."
+    run_stage "Installing CloudNativePG operator..." "${SCRIPT_DIR}/k8s-install-cnpg.sh"
+    ;;
+  apply-ha-database)
+    [[ "$DB_MODE" == "ha" ]] || fail "apply-ha-database command is only valid with DB_MODE=ha."
+    run_stage "Applying HA database manifests without app rebuild/deploy or init Job recreation..." apply_ha_database_only
+    ;;
+  init-db)
+    [[ "$DB_MODE" == "ha" ]] || fail "init-db command is only valid with DB_MODE=ha."
+    run_stage "Running/skipping HA database init only..." apply_ha_init_only
+    ;;
+  deploy-app)
+    run_stage "Building backend image..." build_backend
+    run_stage "Verifying backend image contents..." verify_backend_host_image
+    run_stage "Building frontend image..." build_frontend
+    run_stage "Saving current replica counts..." save_replica_counts
+    run_stage "Disabling HPA before replacing stable tags..." disable_hpa_before_image_replacement
+    run_stage "Scaling backend/frontend to zero before replacing stable tags..." scale_deployments_to_zero
+    run_stage "Removing old same-tag images inside Minikube..." remove_old_minikube_images
+    run_stage "Loading fresh images into Minikube..." load_images
+    if [[ "$DB_MODE" == "ha" ]]; then
+      run_stage "Applying app manifests only; use apply-ha-database and init-db stages for HA database work..." apply_app_manifests_only
+    else
+      run_stage "Applying app/database manifests..." apply_manifests
+    fi
+    run_stage "Forcing app rollout restart after image load..." force_app_rollout_restart
+    run_stage "Restoring replica counts and waiting for rollout..." restore_replica_counts
+    wait_for_rollout
+    ;;
+  verify-app)
+    run_stage "Verifying app rollout..." wait_for_rollout
+    run_stage "Verifying running backend image contents..." verify_running_backend_image
+    print_summary
+    ;;
+  *)
+    fail "Unknown command '${COMMAND}'. Valid commands: ${VALID_COMMANDS[*]}"
+    ;;
+esac
