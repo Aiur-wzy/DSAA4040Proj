@@ -7,20 +7,8 @@ if [[ -f "${SCRIPT_DIR}/lib/k8s.sh" ]]; then
   # shellcheck source=scripts/lib/k8s.sh
   source "${SCRIPT_DIR}/lib/k8s.sh"
 else
-  minikube_cmd() {
-    if [[ -n "${MINIKUBE_PROFILE:-}" ]]; then
-      minikube -p "$MINIKUBE_PROFILE" "$@"
-    else
-      minikube "$@"
-    fi
-  }
-  minikube_ip() { minikube_cmd ip; }
   resolve_kubectl() {
-    if [[ -n "${MINIKUBE_PROFILE:-}" ]]; then
-      require_minikube
-      KUBECTL=(minikube -p "$MINIKUBE_PROFILE" kubectl --)
-      KUBECTL_MODE="minikube -p ${MINIKUBE_PROFILE} kubectl --"
-    elif command -v kubectl >/dev/null 2>&1; then
+    if command -v kubectl >/dev/null 2>&1; then
       KUBECTL=(kubectl)
       KUBECTL_MODE="kubectl"
     elif command -v minikube >/dev/null 2>&1; then
@@ -40,7 +28,7 @@ else
   require_minikube() { require_cmd minikube; }
   require_minikube_running() {
     require_minikube
-    minikube_cmd status >/dev/null 2>&1 || {
+    minikube status >/dev/null 2>&1 || {
       echo "Error: Minikube is not running. Start it first with: minikube start --driver=docker --memory=4096 --cpus=2" >&2
       exit 1
     }
@@ -133,7 +121,7 @@ validate_positive_integer "WATCH_INTERVAL" "$WATCH_INTERVAL"
 validate_positive_integer "SCALE_DOWN_WAIT" "$SCALE_DOWN_WAIT"
 
 if [[ -z "$TARGET_URL" ]]; then
-  TARGET_URL="http://$(minikube_ip):${NODE_PORT}/api/books"
+  TARGET_URL="http://$(minikube ip):${NODE_PORT}/api/books"
 fi
 
 echo "Using Kubernetes command: ${KUBECTL_MODE}"

@@ -256,24 +256,3 @@ curl -i -H "Host: bookstore.local" http://$(minikube ip)/api/admin/cluster/statu
   management.
 - [!] Future improvements: CI/CD, TLS, cloud LoadBalancer, Prometheus/Grafana, production
   auth/RBAC, NetworkPolicy, backup/restore, and stronger database migration tooling.
-
-## Optional Multi-Node and Failure Experiments
-
-- [~] Minikube multi-node experiment runtime verification.
-  Evidence checklist: `kubectl get nodes -o wide`, `MINIKUBE_PROFILE=bookstore-multinode ./scripts/k8s-multinode-verify.sh`.
-- [~] public-backend pod distribution evidence across nodes.
-  Evidence checklist: `kubectl get pods -n bookstore -l app=public-backend -o wide`.
-- [~] Monitoring Dashboard node column screenshot.
-  Evidence checklist: browser screenshot showing Node and Pod IP columns.
-- [~] HPA scale-out evidence in the multi-node profile.
-  Evidence checklist: `MINIKUBE_PROFILE=bookstore-multinode MULTINODE_SCALE_TEST=1 ./scripts/k8s-multinode-verify.sh`.
-- [~] Order consistency stress/edge-case test evidence.
-  Evidence checklist: `./scripts/test-order-consistency.sh` output showing 409 insufficient stock and non-negative final stock.
-- [~] PostgreSQL Pod recovery evidence.
-  Evidence checklist: `MINIKUBE_PROFILE=bookstore-multinode ./scripts/k8s-db-recovery-test.sh` output showing PVC-backed data after Pod restart.
-- [~] Safe stateless node cordon/failure evidence.
-  Evidence checklist: `MINIKUBE_PROFILE=bookstore-multinode ./scripts/k8s-node-failure-test.sh` output showing API availability and uncordon cleanup.
-- [!] PostgreSQL HA remains future work, not implemented in this demo.
-  Future work: managed PostgreSQL or PostgreSQL Operator with failover, backup/restore, and read replicas if needed.
-- [!] Real multi-VM Kubernetes deployment remains future work.
-  Future work: kubeadm/k3s/managed Kubernetes, production Ingress/LoadBalancer, external registry, CSI storage, TLS, NetworkPolicy, and CI/CD.

@@ -12,7 +12,7 @@ resolve_kubectl
 require_minikube
 
 echo "=== Minikube status ==="
-if minikube_cmd status; then
+if minikube status; then
   MINIKUBE_RUNNING=true
 else
   MINIKUBE_RUNNING=false
@@ -21,7 +21,7 @@ fi
 echo
 echo "=== Minikube IP ==="
 if [[ "$MINIKUBE_RUNNING" == "true" ]]; then
-  minikube_ip
+  minikube ip
 else
   echo "Unavailable because Minikube is not running."
 fi

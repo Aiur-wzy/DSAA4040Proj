@@ -74,7 +74,7 @@ preflight() {
 
 api_smoke_tests() {
   local minikube_ip base_url
-  minikube_ip="$(minikube_ip)"
+  minikube_ip="$(minikube ip)"
   base_url="http://${minikube_ip}:${NODE_PORT}"
 
   if [[ "${SKIP_TESTS:-0}" == "1" ]]; then
@@ -106,7 +106,7 @@ hpa_readiness_check() {
 
 print_next_commands() {
   local minikube_ip
-  minikube_ip="$(minikube_ip)"
+  minikube_ip="$(minikube ip)"
   cat <<EOF_NEXT
 
 Full Kubernetes update completed.
@@ -114,14 +114,9 @@ Full Kubernetes update completed.
 Next demo commands:
   PUBLIC_PORT=3000 NODE_PORT=${NODE_PORT} ./scripts/k8s-expose-demo.sh
   ./scripts/k8s-hpa-demo.sh
-  ${KUBECTL_MODE} get hpa -n bookstore -w
-  ${KUBECTL_MODE} get pods -n bookstore -l app=public-backend -w
+  minikube kubectl -- get hpa -n bookstore -w
+  minikube kubectl -- get pods -n bookstore -l app=public-backend -w
   curl -i -H "Host: bookstore.local" http://${minikube_ip}/api/books
-
-For optional multi-node experiment:
-  ./scripts/k8s-multinode-start.sh
-  MINIKUBE_PROFILE=bookstore-multinode ./scripts/k8s-full-update.sh
-  MINIKUBE_PROFILE=bookstore-multinode ./scripts/k8s-multinode-verify.sh
 
 Skip flags:
   SKIP_METRICS=1 ./scripts/k8s-full-update.sh
