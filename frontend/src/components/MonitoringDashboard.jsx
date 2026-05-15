@@ -157,6 +157,7 @@ function MonitoringDashboard({ onBack }) {
   const deployment = status?.deployment || {};
   const hpa = status?.hpa || {};
   const pods = status?.pods || [];
+  const nodeDistribution = status?.nodeDistribution || {};
   const warnings = status?.warnings || [];
   const hasClusterError = Boolean(status?.error || error);
 
@@ -213,6 +214,14 @@ function MonitoringDashboard({ onBack }) {
             <dt>Scaling state</dt><dd><strong>{hpaState}</strong></dd>
           </dl>
         </MetricCard>
+
+        <MetricCard title="Node Distribution">
+          <dl className="metric-grid">
+            <dt>Distinct nodes</dt><dd>{formatValue(nodeDistribution.distinctNodeCount)}</dd>
+            <dt>Nodes</dt>
+            <dd>{nodeDistribution.nodes?.length ? nodeDistribution.nodes.join(", ") : "—"}</dd>
+          </dl>
+        </MetricCard>
       </div>
 
       <div className="monitoring-charts">
@@ -247,6 +256,8 @@ function MonitoringDashboard({ onBack }) {
                 <th>Phase</th>
                 <th>Ready</th>
                 <th>Restarts</th>
+                <th>Node</th>
+                <th>Pod IP</th>
                 <th>CPU</th>
                 <th>Memory</th>
                 <th>Start time</th>
@@ -259,6 +270,8 @@ function MonitoringDashboard({ onBack }) {
                   <td>{pod.phase}</td>
                   <td>{pod.ready ? "Yes" : "No"}</td>
                   <td>{pod.restartCount}</td>
+                  <td>{formatValue(pod.nodeName)}</td>
+                  <td>{formatValue(pod.podIP)}</td>
                   <td>{formatValue(pod.cpu)}</td>
                   <td>{formatValue(pod.memory)}</td>
                   <td>{formatTime(pod.startTime)}</td>
@@ -266,7 +279,7 @@ function MonitoringDashboard({ onBack }) {
               ))}
               {!pods.length ? (
                 <tr>
-                  <td colSpan="7" className="muted">No public-backend Pods reported yet.</td>
+                  <td colSpan="9" className="muted">No public-backend Pods reported yet.</td>
                 </tr>
               ) : null}
             </tbody>

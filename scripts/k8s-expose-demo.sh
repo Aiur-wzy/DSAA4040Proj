@@ -99,7 +99,7 @@ if (( EUID != 0 )); then
   require_cmd sudo
 fi
 
-MINIKUBE_IP="$(minikube ip)"
+MINIKUBE_IP="$(minikube_ip)"
 
 if [[ "$CLEANUP" == false ]]; then
   echo "Using Kubernetes command: ${KUBECTL_MODE}"

@@ -7,8 +7,21 @@ if [[ -f "${SCRIPT_DIR}/lib/k8s.sh" ]]; then
   # shellcheck source=scripts/lib/k8s.sh
   source "${SCRIPT_DIR}/lib/k8s.sh"
 else
+  minikube_cmd() {
+    if [[ -n "${MINIKUBE_PROFILE:-}" ]]; then
+      minikube -p "$MINIKUBE_PROFILE" "$@"
+    else
+      minikube "$@"
+    fi
+  }
+  minikube_ip() { minikube_cmd ip; }
+  minikube_addons_enable() { minikube_cmd addons enable "$@"; }
   resolve_kubectl() {
-    if command -v kubectl >/dev/null 2>&1; then
+    if [[ -n "${MINIKUBE_PROFILE:-}" ]]; then
+      require_minikube
+      KUBECTL=(minikube -p "$MINIKUBE_PROFILE" kubectl --)
+      KUBECTL_MODE="minikube -p ${MINIKUBE_PROFILE} kubectl --"
+    elif command -v kubectl >/dev/null 2>&1; then
       KUBECTL=(kubectl)
       KUBECTL_MODE="kubectl"
     elif command -v minikube >/dev/null 2>&1; then
@@ -28,7 +41,7 @@ else
   require_minikube() { require_cmd minikube; }
   require_minikube_running() {
     require_minikube
-    minikube status >/dev/null 2>&1 || {
+    minikube_cmd status >/dev/null 2>&1 || {
       echo "Error: Minikube is not running. Start it first with: minikube start --driver=docker --memory=4096 --cpus=2" >&2
       exit 1
     }
@@ -248,9 +261,13 @@ EOF_MANIFEST
 
 enable_ingress_addon() {
   if command -v timeout >/dev/null 2>&1; then
-    timeout "$ADDON_ENABLE_TIMEOUT" minikube addons enable ingress
+    if [[ -n "${MINIKUBE_PROFILE:-}" ]]; then
+      timeout "$ADDON_ENABLE_TIMEOUT" minikube -p "$MINIKUBE_PROFILE" addons enable ingress
+    else
+      timeout "$ADDON_ENABLE_TIMEOUT" minikube addons enable ingress
+    fi
   else
-    minikube addons enable ingress
+    minikube_addons_enable ingress
   fi
 }
 
@@ -391,7 +408,7 @@ if ! kubectl_get ingress "$BOOKSTORE_INGRESS" -n "$BOOKSTORE_NAMESPACE"; then
 fi
 
 step "[7/7] Verifying bookstore.local routes"
-MINIKUBE_IP="$(minikube ip)"
+MINIKUBE_IP="$(minikube_ip)"
 route_failures=0
 curl_expect "/" "frontend HTML" || route_failures=$((route_failures + 1))
 curl_expect "/api/health" "backend health JSON" || route_failures=$((route_failures + 1))

@@ -7,8 +7,20 @@ if [[ -f "${SCRIPT_DIR}/lib/k8s.sh" ]]; then
   # shellcheck source=scripts/lib/k8s.sh
   source "${SCRIPT_DIR}/lib/k8s.sh"
 else
+  minikube_cmd() {
+    if [[ -n "${MINIKUBE_PROFILE:-}" ]]; then
+      minikube -p "$MINIKUBE_PROFILE" "$@"
+    else
+      minikube "$@"
+    fi
+  }
+  minikube_addons_enable() { minikube_cmd addons enable "$@"; }
   resolve_kubectl() {
-    if command -v kubectl >/dev/null 2>&1; then
+    if [[ -n "${MINIKUBE_PROFILE:-}" ]]; then
+      require_minikube
+      KUBECTL=(minikube -p "$MINIKUBE_PROFILE" kubectl --)
+      KUBECTL_MODE="minikube -p ${MINIKUBE_PROFILE} kubectl --"
+    elif command -v kubectl >/dev/null 2>&1; then
       KUBECTL=(kubectl)
       KUBECTL_MODE="kubectl"
     elif command -v minikube >/dev/null 2>&1; then
@@ -28,7 +40,7 @@ else
   require_minikube() { require_cmd minikube; }
   require_minikube_running() {
     require_minikube
-    minikube status >/dev/null 2>&1 || {
+    minikube_cmd status >/dev/null 2>&1 || {
       echo "Error: Minikube is not running. Start it first with: minikube start --driver=docker --memory=4096 --cpus=2" >&2
       exit 1
     }
@@ -167,7 +179,7 @@ require_minikube_running
 echo "Using Kubernetes command: ${KUBECTL_MODE}"
 
 step "[1/5] Enabling metrics-server"
-minikube addons enable metrics-server
+minikube_addons_enable metrics-server
 
 step "[2/5] Checking metrics-server Pod status"
 retry 24 5 "metrics-server Deployment" wait_for_metrics_deployment || fail "metrics-server Deployment did not appear in kube-system."

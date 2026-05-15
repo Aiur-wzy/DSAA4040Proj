@@ -72,7 +72,7 @@ node_port="$("${KUBECTL[@]}" get service frontend-service -n "$NAMESPACE" -o jso
 [[ "$node_port" == "$EXPECTED_NODE_PORT" ]] || fail "frontend-service nodePort is '$node_port', expected $EXPECTED_NODE_PORT"
 pass "frontend-service nodePort is $EXPECTED_NODE_PORT"
 
-MINIKUBE_IP="$(minikube ip)"
+MINIKUBE_IP="$(minikube_ip)"
 BASE_URL="http://${MINIKUBE_IP}:${EXPECTED_NODE_PORT}"
 pass "testing Kubernetes frontend-service at ${BASE_URL}"
 

@@ -23,10 +23,12 @@ echo "Using Kubernetes command: ${KUBECTL_MODE}"
 "${KUBECTL[@]}" apply -f k8s/admin-backend-service.yaml
 "${KUBECTL[@]}" apply -f k8s/monitoring-backend-service.yaml
 "${KUBECTL[@]}" apply -f k8s/public-backend-deployment.yaml
+"${KUBECTL[@]}" apply -f k8s/public-backend-pdb.yaml
 "${KUBECTL[@]}" apply -f k8s/admin-backend-deployment.yaml
 "${KUBECTL[@]}" apply -f k8s/monitoring-backend-deployment.yaml
 "${KUBECTL[@]}" apply -f k8s/frontend-service.yaml
 "${KUBECTL[@]}" apply -f k8s/frontend-deployment.yaml
+"${KUBECTL[@]}" apply -f k8s/frontend-pdb.yaml
 "${KUBECTL[@]}" apply -f k8s/ingress.yaml
 "${KUBECTL[@]}" apply -f k8s/hpa.yaml
 
