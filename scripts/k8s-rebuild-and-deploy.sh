@@ -22,6 +22,12 @@ if [[ "$DB_MODE" == "ha" ]]; then
 fi
 BACKEND_DEPLOYMENTS=(public-backend admin-backend monitoring-backend)
 BACKEND_SELECTORS=(app=public-backend app=admin-backend app=monitoring-backend)
+declare -A SAFE_DEFAULT_REPLICAS=(
+  [public-backend]=2
+  [admin-backend]=1
+  [monitoring-backend]=1
+  [frontend]=2
+)
 BACKEND_MANIFESTS=(
   "${REPO_ROOT}/k8s/public-backend-deployment.yaml"
   "${REPO_ROOT}/k8s/admin-backend-deployment.yaml"
@@ -181,12 +187,12 @@ deployment_exists() {
 
 save_replica_counts() {
   local frontend_default
-  frontend_default="$(manifest_replicas "$FRONTEND_DEPLOYMENT_MANIFEST" 2)"
+  frontend_default="$(manifest_replicas "$FRONTEND_DEPLOYMENT_MANIFEST" "${SAFE_DEFAULT_REPLICAS[frontend]}")"
 
   for i in "${!BACKEND_DEPLOYMENTS[@]}"; do
     local deployment="${BACKEND_DEPLOYMENTS[$i]}"
     local default_replicas
-    default_replicas="$(manifest_replicas "${BACKEND_MANIFESTS[$i]}" 1)"
+    default_replicas="$(manifest_replicas "${BACKEND_MANIFESTS[$i]}" "${SAFE_DEFAULT_REPLICAS[$deployment]}")"
     if deployment_exists "$deployment"; then
       BACKEND_REPLICAS[$deployment]="$("${KUBECTL[@]}" get "deployment/${deployment}" -n "$NAMESPACE" -o jsonpath='{.spec.replicas}')"
     else
@@ -201,6 +207,22 @@ save_replica_counts() {
     FRONTEND_REPLICAS="$frontend_default"
   fi
   FRONTEND_REPLICAS="${FRONTEND_REPLICAS:-$frontend_default}"
+
+  local restore_defaults=0
+  if [[ "${RESTORE_DEFAULT_REPLICAS:-0}" == "1" ]]; then
+    info "RESTORE_DEFAULT_REPLICAS=1 set; restoring safe default replica counts instead of saved counts."
+    restore_defaults=1
+  elif [[ "${BACKEND_REPLICAS[public-backend]}" == "0" && "${BACKEND_REPLICAS[admin-backend]}" == "0" && "${BACKEND_REPLICAS[monitoring-backend]}" == "0" && "$FRONTEND_REPLICAS" == "0" ]]; then
+    info "Saved desired replica counts are all zero; assuming a previous failed refresh left application deployments scaled down. Restoring safe default replica counts."
+    restore_defaults=1
+  fi
+
+  if [[ "$restore_defaults" == "1" ]]; then
+    BACKEND_REPLICAS[public-backend]="${SAFE_DEFAULT_REPLICAS[public-backend]}"
+    BACKEND_REPLICAS[admin-backend]="${SAFE_DEFAULT_REPLICAS[admin-backend]}"
+    BACKEND_REPLICAS[monitoring-backend]="${SAFE_DEFAULT_REPLICAS[monitoring-backend]}"
+    FRONTEND_REPLICAS="${SAFE_DEFAULT_REPLICAS[frontend]}"
+  fi
 
   info "Saved desired replica counts: public-backend=${BACKEND_REPLICAS[public-backend]}, admin-backend=${BACKEND_REPLICAS[admin-backend]}, monitoring-backend=${BACKEND_REPLICAS[monitoring-backend]}, ${FRONTEND_DEPLOYMENT}=${FRONTEND_REPLICAS}"
 }
@@ -279,6 +301,46 @@ load_images() {
   fi
 }
 
+
+render_init_job_manifest() {
+  local init_job_name="$1"
+
+  awk -v init_job_name="$init_job_name" '
+    !renamed && $0 == "  name: postgres-init" {
+      print "  name: " init_job_name
+      renamed = 1
+      next
+    }
+    { print }
+  ' k8s/postgres-init-job.yaml
+}
+
+apply_init_job_manifest() {
+  local init_job_name="$1"
+
+  render_init_job_manifest "$init_job_name" | "${KUBECTL[@]}" apply -f -
+}
+
+print_init_job_diagnostics() {
+  local init_job_name="$1"
+
+  info "${init_job_name} did not complete before the timeout; collecting diagnostics..."
+  "${KUBECTL[@]}" describe job "$init_job_name" -n "$NAMESPACE" || true
+  "${KUBECTL[@]}" describe pod -n "$NAMESPACE" -l "job-name=${init_job_name}" || true
+  "${KUBECTL[@]}" logs -n "$NAMESPACE" -l "job-name=${init_job_name}" --tail=100 || true
+}
+
+wait_for_init_job_complete() {
+  local init_job_name="$1"
+
+  if ! "${KUBECTL[@]}" wait --for=condition=complete "job/${init_job_name}" -n "$NAMESPACE" --timeout=180s; then
+    if [[ "$init_job_name" == "postgres-init-ha" ]]; then
+      print_init_job_diagnostics "$init_job_name"
+    fi
+    return 1
+  fi
+}
+
 apply_manifests() {
   cd "$REPO_ROOT"
 
@@ -330,13 +392,13 @@ apply_manifests() {
     else
       info "Recreating ${init_job_name} Job because it has not completed or FORCE_POSTGRES_INIT=1 was set. This may reset demo data depending on the SQL files."
       "${KUBECTL[@]}" delete job "$init_job_name" -n "$NAMESPACE" --ignore-not-found
-      sed "s/name: postgres-init/name: ${init_job_name}/" k8s/postgres-init-job.yaml | "${KUBECTL[@]}" apply -f -
-      "${KUBECTL[@]}" wait --for=condition=complete "job/${init_job_name}" -n "$NAMESPACE" --timeout=180s
+      apply_init_job_manifest "$init_job_name"
+      wait_for_init_job_complete "$init_job_name"
     fi
   else
     info "${init_job_name} Job does not exist; creating it now. Set FORCE_POSTGRES_INIT=1 on later runs to force recreation."
-    sed "s/name: postgres-init/name: ${init_job_name}/" k8s/postgres-init-job.yaml | "${KUBECTL[@]}" apply -f -
-    "${KUBECTL[@]}" wait --for=condition=complete "job/${init_job_name}" -n "$NAMESPACE" --timeout=180s
+    apply_init_job_manifest "$init_job_name"
+    wait_for_init_job_complete "$init_job_name"
   fi
 
   "${KUBECTL[@]}" apply -f k8s/monitoring-backend-rbac.yaml
