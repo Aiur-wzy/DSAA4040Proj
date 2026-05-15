@@ -9,6 +9,9 @@ source "${SCRIPT_DIR}/lib/k8s.sh"
 
 NODE_PORT="${NODE_PORT:-30080}"
 NAMESPACE="bookstore"
+DB_MODE="${DB_MODE:-single}"
+DB_SERVICE="postgres-service"
+[[ "$DB_MODE" == "ha" ]] && DB_SERVICE="bookstore-postgres-rw"
 
 step() { echo; echo "$1"; }
 warn() { echo "Warning: $*" >&2; }
@@ -64,12 +67,16 @@ preflight() {
     scripts/test-admin-api.sh \
     scripts/k8s-status.sh \
     scripts/k8s-expose-demo.sh \
-    scripts/k8s-hpa-demo.sh; do
+    scripts/k8s-hpa-demo.sh \
+    scripts/k8s-install-cnpg.sh \
+    scripts/k8s-postgres-ha-status.sh \
+    scripts/k8s-postgres-ha-failover-test.sh; do
     check_executable "$script"
   done
 
   echo "Using Kubernetes command: ${KUBECTL_MODE}"
   echo "Using namespace: ${NAMESPACE}"
+  echo "Database mode: ${DB_MODE}; backend DB service: ${DB_SERVICE}; HA enabled=$([[ "$DB_MODE" == "ha" ]] && echo yes || echo no)"
 }
 
 api_smoke_tests() {
@@ -132,7 +139,7 @@ step "[1/8] Preflight"
 preflight
 
 step "[2/8] Rebuild and deploy bookstore"
-run_required "bookstore rebuild/deploy" "${SCRIPT_DIR}/k8s-rebuild-and-deploy.sh"
+run_required "bookstore rebuild/deploy" env DB_MODE="$DB_MODE" "${SCRIPT_DIR}/k8s-rebuild-and-deploy.sh"
 
 step "[3/8] Verify core app routes"
 run_required "core Kubernetes NodePort route verification" "${SCRIPT_DIR}/k8s-test-local.sh"
@@ -156,7 +163,7 @@ api_smoke_tests
 hpa_readiness_check
 
 step "[7/8] Print cluster status"
-run_required "cluster status" "${SCRIPT_DIR}/k8s-status.sh"
+run_required "cluster status" env DB_MODE="$DB_MODE" "${SCRIPT_DIR}/k8s-status.sh"
 
 step "[8/8] Print next demo commands"
 print_next_commands

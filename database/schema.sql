@@ -30,7 +30,10 @@ CREATE TABLE orders (
     user_id VARCHAR(100) NOT NULL,
     total_price NUMERIC(10, 2) NOT NULL CHECK (total_price >= 0),
     status VARCHAR(50) NOT NULL DEFAULT 'CREATED',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    idempotency_key VARCHAR(128) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    -- Idempotency-Key makes POST /api/orders safe under timeout/retry/failover ambiguity.
+    UNIQUE (user_id, idempotency_key)
 );
 
 -- order_items stores item-level order details and preserves the purchase-time price snapshot.

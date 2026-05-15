@@ -4,6 +4,7 @@ metadata:
   name: bookstore-config
   namespace: bookstore
 data:
+  DB_MODE: single
   DB_HOST: postgres-service
   DB_PORT: "5432"
   DB_NAME: bookstore

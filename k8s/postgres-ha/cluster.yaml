@@ -1,0 +1,26 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: bookstore-postgres
+  namespace: bookstore
+spec:
+  instances: 3
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.4
+
+  bootstrap:
+    initdb:
+      database: bookstore
+      owner: bookstore
+      secret:
+        name: bookstore-postgres-app
+
+  storage:
+    size: 2Gi
+
+  monitoring:
+    enablePodMonitor: false
+
+  postgresql:
+    parameters:
+      shared_buffers: 128MB
+      max_connections: "100"

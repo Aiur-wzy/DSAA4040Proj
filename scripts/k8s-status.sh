@@ -7,6 +7,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/k8s.sh"
 
 NAMESPACE="bookstore"
+DB_MODE="${DB_MODE:-single}"
+DB_SERVICE="postgres-service"
+[[ "$DB_MODE" == "ha" ]] && DB_SERVICE="bookstore-postgres-rw"
 
 resolve_kubectl
 require_minikube
@@ -29,6 +32,11 @@ fi
 echo
 echo "=== Kubernetes command mode ==="
 echo "$KUBECTL_MODE"
+
+echo
+echo "=== Database mode ==="
+echo "DB_MODE=${DB_MODE}"
+echo "Backend DB service=${DB_SERVICE}"
 
 if [[ "$MINIKUBE_RUNNING" != "true" ]]; then
   echo
@@ -71,7 +79,12 @@ print_service_endpoints() {
 }
 
 echo
-for service in public-backend-service admin-backend-service monitoring-backend-service frontend-service; do
+for service in "$DB_SERVICE" public-backend-service admin-backend-service monitoring-backend-service frontend-service; do
   print_service_endpoints "$service"
   echo
 done
+
+if [[ "$DB_MODE" == "ha" ]]; then
+  echo "=== CloudNativePG HA summary ==="
+  "${SCRIPT_DIR}/k8s-postgres-ha-status.sh" || true
+fi
