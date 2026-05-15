@@ -143,7 +143,7 @@ preflight() {
 }
 
 build_backend() {
-  (cd "$REPO_ROOT" && eval "$(minikube_cmd docker-env -u)" && docker compose build backend)
+  (cd "$REPO_ROOT" && eval "$(minikube docker-env -u)" && docker compose build backend)
   image_exists "$BACKEND_IMAGE" || fail "Missing image ${BACKEND_IMAGE} after backend build."
 }
 
@@ -160,7 +160,7 @@ verify_backend_host_image() {
 }
 
 build_frontend() {
-  (cd "$REPO_ROOT" && eval "$(minikube_cmd docker-env -u)" && docker compose build frontend)
+  (cd "$REPO_ROOT" && eval "$(minikube docker-env -u)" && docker compose build frontend)
   image_exists "$FRONTEND_IMAGE" || fail "Missing image ${FRONTEND_IMAGE} after frontend build."
 }
 
@@ -247,10 +247,10 @@ remove_minikube_image() {
   local image="$1"
   local alias
 
-  minikube_ssh docker rmi -f "$image" || true
+  minikube ssh -- docker rmi -f "$image" || true
   alias="$(docker_library_alias "$image" || true)"
   if [[ -n "$alias" && "$alias" != "$image" ]]; then
-    minikube_ssh docker rmi -f "$alias" || true
+    minikube ssh -- docker rmi -f "$alias" || true
   fi
 }
 
@@ -260,10 +260,10 @@ remove_old_minikube_images() {
 }
 
 load_images() {
-  minikube_image_load "$BACKEND_IMAGE"
-  minikube_image_load "$FRONTEND_IMAGE"
+  minikube image load "$BACKEND_IMAGE"
+  minikube image load "$FRONTEND_IMAGE"
   if image_exists "$POSTGRES_IMAGE"; then
-    minikube_image_load "$POSTGRES_IMAGE"
+    minikube image load "$POSTGRES_IMAGE"
   else
     info "Warning: host image ${POSTGRES_IMAGE} not found; Minikube will pull it if needed."
   fi
@@ -311,12 +311,10 @@ apply_manifests() {
   "${KUBECTL[@]}" apply -f k8s/admin-backend-service.yaml
   "${KUBECTL[@]}" apply -f k8s/monitoring-backend-service.yaml
   "${KUBECTL[@]}" apply -f k8s/public-backend-deployment.yaml
-  "${KUBECTL[@]}" apply -f k8s/public-backend-pdb.yaml
   "${KUBECTL[@]}" apply -f k8s/admin-backend-deployment.yaml
   "${KUBECTL[@]}" apply -f k8s/monitoring-backend-deployment.yaml
   "${KUBECTL[@]}" apply -f k8s/frontend-service.yaml
   "${KUBECTL[@]}" apply -f k8s/frontend-deployment.yaml
-  "${KUBECTL[@]}" apply -f k8s/frontend-pdb.yaml
   "${KUBECTL[@]}" apply -f k8s/ingress.yaml
   "${KUBECTL[@]}" apply -f k8s/hpa.yaml
 
