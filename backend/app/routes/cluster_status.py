@@ -43,6 +43,10 @@ def _empty_status(warnings=None, error=None):
             "targetCPUUtilization": None,
         },
         "pods": [],
+        "nodeDistribution": {
+            "distinctNodeCount": 0,
+            "nodes": [],
+        },
         "metricsAvailable": False,
         "warnings": warnings or [],
     }
@@ -189,11 +193,21 @@ def _pod_summaries(core_api, metrics_by_pod, warnings):
                 "ready": _pod_ready(pod),
                 "restartCount": _pod_restart_count(pod),
                 "startTime": _isoformat(pod.status.start_time),
+                "nodeName": pod.spec.node_name,
+                "podIP": pod.status.pod_ip,
                 "cpu": usage.get("cpu"),
                 "memory": usage.get("memory"),
             }
         )
     return sorted(pods, key=lambda item: item["name"])
+
+
+def _node_distribution(pods):
+    nodes = sorted({pod.get("nodeName") for pod in pods if pod.get("nodeName")})
+    return {
+        "distinctNodeCount": len(nodes),
+        "nodes": nodes,
+    }
 
 
 @router.get("/status")
@@ -218,6 +232,7 @@ def get_cluster_status():
         "deployment": deployment,
         "hpa": hpa,
         "pods": pods,
+        "nodeDistribution": _node_distribution(pods),
         "metricsAvailable": metrics_available,
         "warnings": warnings,
     }

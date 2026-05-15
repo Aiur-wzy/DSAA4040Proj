@@ -47,6 +47,7 @@ report/
 - `report/`: final report scaffold (`report/final_report.md`) for screenshots, command output, and analysis.
 - `docs/demo_manual.md`: live demo runbook for final presentation preparation.
 - `docs/architecture_and_defense_notes.md`: detailed architecture, design rationale, and defense Q&A notes.
+- `docs/multinode_experiment.md`: optional Minikube multi-node experiment workflow, limitations, and production migration notes.
 
 ## Final Demo and Defense Preparation
 
@@ -95,6 +96,14 @@ This top-level workflow rebuilds and deploys the split-backend bookstore system,
 
 ```bash
 PUBLIC_PORT=3000 NODE_PORT=30080 ./scripts/k8s-expose-demo.sh
+```
+
+The optional multi-node experiment is documented in [docs/multinode_experiment.md](docs/multinode_experiment.md). It does not replace the stable single-node demo:
+
+```bash
+./scripts/k8s-multinode-start.sh
+MINIKUBE_PROFILE=bookstore-multinode ./scripts/k8s-full-update.sh
+MINIKUBE_PROFILE=bookstore-multinode ./scripts/k8s-multinode-verify.sh
 ```
 
 The focused scripts remain available independently:
