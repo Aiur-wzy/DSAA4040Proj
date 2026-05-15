@@ -29,11 +29,17 @@ For orders and inventory, the bookstore chooses **CP/ACID** behavior over accept
 
    The script uses a pinned CloudNativePG release URL by default and applies it with `kubectl apply --server-side`. Override with `CNPG_VERSION` or `CNPG_MANIFEST_URL` if your environment needs a locally downloaded manifest.
 
-3. Deploy the bookstore in HA mode:
+3. Deploy the bookstore in HA mode using staged commands. This is safer on single-node Minikube because it avoids combining operator install, three PostgreSQL instances, init, image replacement, app rollout, ingress, and metrics-server pressure in one run. A 4GB Minikube profile may be unstable; use 6GB+ memory if available.
 
    ```bash
-   DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh
+   DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh install-cnpg
+   DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh apply-ha-database
+   DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh init-db
+   DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh deploy-app
+   DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh verify-app
    ```
+
+   The `init-db` stage checks the HA database for `books`, `orders`, `order_items`, and `carts` and skips `postgres-init-ha` when those tables already exist. It recreates a previous init Job only when `FORCE_POSTGRES_INIT=1` is set.
 
 4. Inspect HA status:
 
@@ -50,7 +56,7 @@ For orders and inventory, the bookstore chooses **CP/ACID** behavior over accept
 ## DB_MODE behavior
 
 - `DB_MODE=single` is the default. It applies the existing single PostgreSQL Deployment/PVC/service and uses `postgres-service`.
-- `DB_MODE=ha` applies `k8s/postgres-ha/`, waits for CloudNativePG `Cluster/bookstore-postgres`, initializes schema/seed data through the HA read-write service, and configures backends to use `bookstore-postgres-rw`.
+- `DB_MODE=ha` should be run with the staged commands above. The HA database stage applies `k8s/postgres-ha/`, waits for CloudNativePG `Cluster/bookstore-postgres`, the init stage initializes or skips schema/seed data through the HA read-write service, and the app stage configures backends to use `bookstore-postgres-rw`.
 - `bookstore-postgres-ro` is available for future read-only browsing experiments, but the app currently routes all queries to the write service for strong consistency.
 
 If your environment cannot pull official CloudNativePG or PostgreSQL images, mirror the official images into a trusted registry and update the operator/cluster manifests. Do not hardcode unverified mirrors.

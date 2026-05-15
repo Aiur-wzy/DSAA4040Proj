@@ -16,7 +16,7 @@ spec:
       containers:
         - name: backend
           image: bookstore-backend:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Never
           ports:
             - containerPort: 8000
           env:
