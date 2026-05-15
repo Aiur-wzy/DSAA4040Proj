@@ -157,7 +157,9 @@ function MonitoringDashboard({ onBack }) {
   const deployment = status?.deployment || {};
   const hpa = status?.hpa || {};
   const pods = status?.pods || [];
-  const warnings = status?.warnings || [];
+  const db = status?.db || {};
+  const dbWarnings = db?.warnings || [];
+  const warnings = [...(status?.warnings || []), ...dbWarnings];
   const hasClusterError = Boolean(status?.error || error);
 
   return (
@@ -211,6 +213,25 @@ function MonitoringDashboard({ onBack }) {
             <dt>Min / max replicas</dt><dd>{formatValue(hpa.minReplicas)} / {formatValue(hpa.maxReplicas)}</dd>
             <dt>Current / desired</dt><dd>{formatValue(hpa.currentReplicas)} / {formatValue(hpa.desiredReplicas)}</dd>
             <dt>Scaling state</dt><dd><strong>{hpaState}</strong></dd>
+          </dl>
+        </MetricCard>
+
+        <MetricCard title="Database Status">
+          <dl className="metric-grid">
+            <dt>Mode</dt><dd><strong>{formatValue(db.mode)}</strong></dd>
+            <dt>Write host</dt><dd>{formatValue(db.host)}</dd>
+            <dt>Read host</dt><dd>{formatValue(db.readHost)}</dd>
+            <dt>Cluster</dt><dd>{formatValue(db.clusterName)}</dd>
+            <dt>Primary pod</dt><dd>{formatValue(db.primaryPod)}</dd>
+            <dt>Ready instances</dt><dd>{formatValue(db.readyInstances)}</dd>
+            <dt>Replicas</dt>
+            <dd>
+              {(db.replicaPods || []).length
+                ? db.replicaPods.map((pod) => `${pod.name} (${pod.ready ? "ready" : pod.phase || "not ready"})`).join(", ")
+                : "—"}
+            </dd>
+            <dt>Services</dt>
+            <dd>{(db.services || []).map((service) => service.name).join(", ") || "—"}</dd>
           </dl>
         </MetricCard>
       </div>

@@ -12,13 +12,18 @@ request() {
   local method="$1"
   local path="$2"
   local data="${3:-}"
+  local idempotency_key="${4:-}"
   local url="${BASE_URL}${path}"
+  local headers=(-H 'Content-Type: application/json')
+  if [[ -n "$idempotency_key" ]]; then
+    headers+=(-H "Idempotency-Key: ${idempotency_key}")
+  fi
 
   echo "[$method] $url"
   if [[ -n "$data" ]]; then
-    curl -sS -X "$method" "$url" -H 'Content-Type: application/json' -d "$data"
+    curl -sS -X "$method" "$url" "${headers[@]}" -d "$data"
   else
-    curl -sS -X "$method" "$url"
+    curl -sS -X "$method" "$url" "${headers[@]}"
   fi
   echo
 }
@@ -45,7 +50,8 @@ print_section "6) GET /api/cart (after add)"
 request GET /api/cart
 
 print_section "7) POST /api/orders"
-request POST /api/orders '{}'
+ORDER_KEY="smoke-$(date +%s)-${RANDOM}"
+request POST /api/orders '{}' "$ORDER_KEY"
 
 print_section "8) GET /api/orders"
 request GET /api/orders

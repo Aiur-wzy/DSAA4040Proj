@@ -2,6 +2,11 @@
 # Shared Kubernetes helpers for scripts that must work when standalone kubectl
 # is unavailable and Minikube provides kubectl via `minikube kubectl --`.
 
+# Respect MINIKUBE_PROFILE across scripts without forcing callers to remember -p.
+if [[ -n "${MINIKUBE_PROFILE:-}" ]]; then
+  minikube() { command minikube -p "${MINIKUBE_PROFILE}" "$@"; }
+fi
+
 resolve_kubectl() {
   if command -v kubectl >/dev/null 2>&1; then
     KUBECTL=(kubectl)

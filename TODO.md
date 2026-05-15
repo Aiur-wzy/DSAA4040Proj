@@ -256,3 +256,15 @@ curl -i -H "Host: bookstore.local" http://$(minikube ip)/api/admin/cluster/statu
   management.
 - [!] Future improvements: CI/CD, TLS, cloud LoadBalancer, Prometheus/Grafana, production
   auth/RBAC, NetworkPolicy, backup/restore, and stronger database migration tooling.
+
+
+## PostgreSQL HA / Distributed Database Experiment
+
+- [~] PostgreSQL HA runtime verification needs to be captured from a live `DB_MODE=ha` run.
+  Verify with: `DB_MODE=ha ./scripts/k8s-postgres-ha-status.sh`.
+- [~] Failover test evidence needs to be captured after CloudNativePG is installed.
+  Verify with: `DB_MODE=ha ./scripts/k8s-postgres-ha-failover-test.sh`.
+- [~] Idempotency retry evidence needs to be captured against a running backend.
+  Verify with: `BASE_URL=http://$(minikube ip):30080 ./scripts/test-order-consistency.sh`.
+- [~] DB HA Monitoring screenshot should be captured from the Monitoring Dashboard in HA mode.
+- [!] Production-grade DB HA requires real multi-VM Kubernetes or managed PostgreSQL validation, production storage, backups, TLS, monitoring, and disaster recovery testing.

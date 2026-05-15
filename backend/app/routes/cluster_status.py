@@ -11,6 +11,10 @@ NAMESPACE = os.getenv("BOOKSTORE_NAMESPACE", os.getenv("POD_NAMESPACE", "booksto
 BACKEND_DEPLOYMENT = os.getenv("BOOKSTORE_BACKEND_DEPLOYMENT", "public-backend")
 BACKEND_HPA = os.getenv("BOOKSTORE_BACKEND_HPA", "public-backend-hpa")
 BACKEND_POD_SELECTOR = os.getenv("BOOKSTORE_BACKEND_POD_SELECTOR", "app=public-backend")
+DB_MODE = os.getenv("DB_MODE", "single")
+DB_HOST = os.getenv("DB_WRITE_HOST") or os.getenv("DB_HOST", "postgres-service")
+DB_READ_HOST = os.getenv("DB_READ_HOST")
+CNPG_CLUSTER_NAME = os.getenv("CNPG_CLUSTER_NAME", "bookstore-postgres")
 METRICS_WARNING = (
     "Metrics API is unavailable. Run ./scripts/k8s-fix-metrics-server.sh "
     "and verify kubectl top pods."
@@ -43,6 +47,16 @@ def _empty_status(warnings=None, error=None):
             "targetCPUUtilization": None,
         },
         "pods": [],
+        "db": {
+            "mode": DB_MODE,
+            "host": DB_HOST,
+            "clusterName": CNPG_CLUSTER_NAME if DB_MODE == "ha" else None,
+            "primaryPod": None,
+            "replicaPods": [],
+            "readyInstances": None,
+            "services": [],
+            "warnings": warnings or [],
+        },
         "metricsAvailable": False,
         "warnings": warnings or [],
     }
@@ -196,6 +210,102 @@ def _pod_summaries(core_api, metrics_by_pod, warnings):
     return sorted(pods, key=lambda item: item["name"])
 
 
+def _service_summary(service):
+    return {
+        "name": service.metadata.name,
+        "type": service.spec.type,
+        "clusterIP": service.spec.cluster_ip,
+        "ports": [
+            {"name": port.name, "port": port.port, "targetPort": port.target_port}
+            for port in service.spec.ports or []
+        ],
+    }
+
+
+def _db_status(core_api, custom_api):
+    warnings = []
+    status = {
+        "mode": DB_MODE,
+        "host": DB_HOST,
+        "readHost": DB_READ_HOST,
+        "clusterName": CNPG_CLUSTER_NAME if DB_MODE == "ha" else None,
+        "primaryPod": None,
+        "replicaPods": [],
+        "readyInstances": None,
+        "services": [],
+        "warnings": warnings,
+    }
+
+    if DB_MODE == "ha":
+        try:
+            cluster = custom_api.get_namespaced_custom_object(
+                group="postgresql.cnpg.io",
+                version="v1",
+                namespace=NAMESPACE,
+                plural="clusters",
+                name=CNPG_CLUSTER_NAME,
+            )
+            cluster_status = cluster.get("status", {})
+            status["primaryPod"] = cluster_status.get("currentPrimary")
+            status["readyInstances"] = cluster_status.get("readyInstances")
+        except Exception as exc:
+            warnings.append(
+                f"Unable to read CloudNativePG Cluster {CNPG_CLUSTER_NAME}: {_error_reason(exc)}"
+            )
+
+        try:
+            pods = core_api.list_namespaced_pod(
+                NAMESPACE, label_selector=f"cnpg.io/cluster={CNPG_CLUSTER_NAME}"
+            )
+            replica_pods = []
+            for pod in pods.items:
+                labels = pod.metadata.labels or {}
+                role = labels.get("role") or labels.get("cnpg.io/instanceRole")
+                pod_summary = {
+                    "name": pod.metadata.name,
+                    "phase": pod.status.phase,
+                    "ready": _pod_ready(pod),
+                    "role": role,
+                }
+                if pod.metadata.name == status["primaryPod"] or role == "primary":
+                    status["primaryPod"] = pod.metadata.name
+                else:
+                    replica_pods.append(pod_summary)
+            status["replicaPods"] = sorted(replica_pods, key=lambda item: item["name"])
+        except Exception as exc:
+            warnings.append(f"Unable to list PostgreSQL HA Pods: {_error_reason(exc)}")
+
+        service_selector = f"cnpg.io/cluster={CNPG_CLUSTER_NAME}"
+    else:
+        try:
+            pods = core_api.list_namespaced_pod(NAMESPACE, label_selector="app=postgres")
+            postgres_pods = [
+                {
+                    "name": pod.metadata.name,
+                    "phase": pod.status.phase,
+                    "ready": _pod_ready(pod),
+                    "role": "single",
+                }
+                for pod in pods.items
+            ]
+            status["primaryPod"] = postgres_pods[0]["name"] if postgres_pods else None
+            status["readyInstances"] = sum(1 for pod in postgres_pods if pod["ready"])
+        except Exception as exc:
+            warnings.append(f"Unable to list single PostgreSQL Pod: {_error_reason(exc)}")
+        service_selector = None
+
+    try:
+        if service_selector:
+            services = core_api.list_namespaced_service(NAMESPACE, label_selector=service_selector).items
+        else:
+            services = [core_api.read_namespaced_service(DB_HOST, NAMESPACE)]
+        status["services"] = [_service_summary(service) for service in services]
+    except Exception as exc:
+        warnings.append(f"Unable to read PostgreSQL service status: {_error_reason(exc)}")
+
+    return status
+
+
 @router.get("/status")
 def get_cluster_status():
     loaded, error = _load_kubernetes_config()
@@ -212,12 +322,14 @@ def get_cluster_status():
     hpa = _hpa_summary(autoscaling_api, warnings)
     metrics_by_pod, metrics_available = _pod_metrics(custom_api, warnings)
     pods = _pod_summaries(core_api, metrics_by_pod, warnings)
+    db = _db_status(core_api, custom_api)
 
     return {
         "namespace": NAMESPACE,
         "deployment": deployment,
         "hpa": hpa,
         "pods": pods,
+        "db": db,
         "metricsAvailable": metrics_available,
         "warnings": warnings,
     }

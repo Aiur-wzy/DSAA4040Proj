@@ -125,6 +125,16 @@ The focused rebuild/deploy command is:
 ./scripts/k8s-rebuild-and-deploy.sh
 ```
 
+The default database mode remains the stable single PostgreSQL deployment (`DB_MODE=single`). An optional CloudNativePG HA experiment is available with `DB_MODE=ha` after installing the operator:
+
+```bash
+./scripts/k8s-install-cnpg.sh
+DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh
+DB_MODE=ha ./scripts/k8s-postgres-ha-status.sh
+```
+
+See [PostgreSQL HA experiment](docs/postgres_ha_experiment.md) for the primary/replica design, failover test, idempotent checkout behavior, and limitations.
+
 The script performs the full local-image update workflow:
 
 ```text

@@ -64,9 +64,10 @@ export function removeCartItem(bookId) {
   });
 }
 
-export function placeOrder() {
+export function placeOrder(idempotencyKey) {
   return request("/api/orders", {
-    method: "POST"
+    method: "POST",
+    headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}
   });
 }
 

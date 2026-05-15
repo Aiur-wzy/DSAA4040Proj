@@ -126,8 +126,10 @@ function App() {
   const handlePlaceOrder = async () => {
     setError("");
     setMessage("");
+    const idempotencyKey =
+      window.crypto?.randomUUID?.() || `order-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     try {
-      await placeOrder();
+      await placeOrder(idempotencyKey);
       await Promise.all([refreshBooks(), refreshCart(), refreshOrders()]);
       setMessage("Order placed successfully.");
     } catch (err) {

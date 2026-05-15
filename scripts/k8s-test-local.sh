@@ -7,6 +7,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/k8s.sh"
 
 NAMESPACE="bookstore"
+DB_MODE="${DB_MODE:-single}"
+DB_SERVICE="postgres-service"
+[[ "$DB_MODE" == "ha" ]] && DB_SERVICE="bookstore-postgres-rw"
 EXPECTED_NODE_PORT="30080"
 
 pass() { echo "PASS: $1"; }
@@ -46,6 +49,7 @@ resolve_kubectl
 require_minikube_running
 require_cmd curl
 echo "Using Kubernetes command: ${KUBECTL_MODE}"
+echo "Database mode: ${DB_MODE}; backend DB service: ${DB_SERVICE}"
 pass "required commands are available"
 
 step "Checking Kubernetes namespace and resources"

@@ -11,6 +11,15 @@ source "${SCRIPT_DIR}/lib/k8s.sh"
 NAMESPACE="bookstore"
 POSTGRES_IMAGE="postgres:16"
 NODE_PORT="30080"
+DB_MODE="${DB_MODE:-single}"
+if [[ "$DB_MODE" != "single" && "$DB_MODE" != "ha" ]]; then
+  echo "Error: DB_MODE must be single or ha (got $DB_MODE)" >&2
+  exit 1
+fi
+DB_SERVICE="postgres-service"
+if [[ "$DB_MODE" == "ha" ]]; then
+  DB_SERVICE="bookstore-postgres-rw"
+fi
 BACKEND_DEPLOYMENTS=(public-backend admin-backend monitoring-backend)
 BACKEND_SELECTORS=(app=public-backend app=admin-backend app=monitoring-backend)
 BACKEND_MANIFESTS=(
@@ -138,6 +147,7 @@ preflight() {
 
   info "Using Kubernetes command: ${KUBECTL_MODE}"
   info "Using namespace: ${NAMESPACE}"
+  info "DB_MODE=${DB_MODE}; backend DB service=${DB_SERVICE}; HA enabled=$([[ "$DB_MODE" == "ha" ]] && echo yes || echo no)"
   info "Backend image reused by deployments: ${BACKEND_DEPLOYMENTS[*]} -> ${BACKEND_IMAGE}"
   info "Frontend deployment/image: ${FRONTEND_DEPLOYMENT} -> ${FRONTEND_IMAGE}"
 }
@@ -282,28 +292,51 @@ apply_manifests() {
     -n "$NAMESPACE" \
     --dry-run=client -o yaml | "${KUBECTL[@]}" apply -f -
 
-  "${KUBECTL[@]}" apply -f k8s/configmap.yaml
   "${KUBECTL[@]}" apply -f k8s/secret.yaml
-  "${KUBECTL[@]}" apply -f k8s/postgres-service.yaml
-  "${KUBECTL[@]}" apply -f k8s/postgres-deployment.yaml
+  if [[ "$DB_MODE" == "ha" ]]; then
+    info "Configuring bookstore-config for CloudNativePG HA service ${DB_SERVICE}..."
+    "${KUBECTL[@]}" create configmap bookstore-config \
+      --from-literal=DB_MODE=ha \
+      --from-literal=DB_HOST="${DB_SERVICE}" \
+      --from-literal=DB_WRITE_HOST="${DB_SERVICE}" \
+      --from-literal=DB_READ_HOST=bookstore-postgres-ro \
+      --from-literal=DB_PORT=5432 \
+      --from-literal=DB_NAME=bookstore \
+      --from-literal=APP_USER_ID=demo-user \
+      -n "$NAMESPACE" --dry-run=client -o yaml | "${KUBECTL[@]}" apply -f -
+    if deployment_exists postgres; then
+      info "DB_MODE=ha selected; scaling legacy single PostgreSQL Deployment to 0 without deleting its PVC."
+      "${KUBECTL[@]}" scale deployment/postgres -n "$NAMESPACE" --replicas=0
+    fi
+    "${KUBECTL[@]}" apply -f k8s/postgres-ha/app-secret.yaml
+    "${KUBECTL[@]}" apply -f k8s/postgres-ha/cluster.yaml
+    info "Waiting for CloudNativePG Cluster/bookstore-postgres to report Ready=True..."
+    "${KUBECTL[@]}" wait --for=condition=Ready cluster/bookstore-postgres -n "$NAMESPACE" --timeout=300s
+    init_job_name="postgres-init-ha"
+  else
+    "${KUBECTL[@]}" apply -f k8s/configmap.yaml
+    "${KUBECTL[@]}" apply -f k8s/postgres-service.yaml
+    "${KUBECTL[@]}" apply -f k8s/postgres-deployment.yaml
 
-  info "Waiting for PostgreSQL readiness before the init Job..."
-  "${KUBECTL[@]}" wait --for=condition=ready pod -l app=postgres -n "$NAMESPACE" --timeout=180s
+    info "Waiting for PostgreSQL readiness before the init Job..."
+    "${KUBECTL[@]}" wait --for=condition=ready pod -l app=postgres -n "$NAMESPACE" --timeout=180s
+    init_job_name="postgres-init"
+  fi
 
-  if "${KUBECTL[@]}" get job postgres-init -n "$NAMESPACE" >/dev/null 2>&1; then
-    succeeded="$("${KUBECTL[@]}" get job postgres-init -n "$NAMESPACE" -o jsonpath='{.status.succeeded}' 2>/dev/null || true)"
+  if "${KUBECTL[@]}" get job "$init_job_name" -n "$NAMESPACE" >/dev/null 2>&1; then
+    succeeded="$("${KUBECTL[@]}" get job "$init_job_name" -n "$NAMESPACE" -o jsonpath='{.status.succeeded}' 2>/dev/null || true)"
     if [[ "$succeeded" == "1" && "${FORCE_POSTGRES_INIT:-0}" != "1" ]]; then
-      info "postgres-init Job already completed; database init will not be rerun. Set FORCE_POSTGRES_INIT=1 to recreate it."
+      info "${init_job_name} Job already completed; database init will not be rerun. Set FORCE_POSTGRES_INIT=1 to recreate it."
     else
-      info "Recreating postgres-init Job because it has not completed or FORCE_POSTGRES_INIT=1 was set. This may reset demo data depending on the SQL files."
-      "${KUBECTL[@]}" delete job postgres-init -n "$NAMESPACE" --ignore-not-found
-      "${KUBECTL[@]}" apply -f k8s/postgres-init-job.yaml
-      "${KUBECTL[@]}" wait --for=condition=complete job/postgres-init -n "$NAMESPACE" --timeout=180s
+      info "Recreating ${init_job_name} Job because it has not completed or FORCE_POSTGRES_INIT=1 was set. This may reset demo data depending on the SQL files."
+      "${KUBECTL[@]}" delete job "$init_job_name" -n "$NAMESPACE" --ignore-not-found
+      sed "s/name: postgres-init/name: ${init_job_name}/" k8s/postgres-init-job.yaml | "${KUBECTL[@]}" apply -f -
+      "${KUBECTL[@]}" wait --for=condition=complete "job/${init_job_name}" -n "$NAMESPACE" --timeout=180s
     fi
   else
-    info "postgres-init Job does not exist; creating it now. Set FORCE_POSTGRES_INIT=1 on later runs to force recreation."
-    "${KUBECTL[@]}" apply -f k8s/postgres-init-job.yaml
-    "${KUBECTL[@]}" wait --for=condition=complete job/postgres-init -n "$NAMESPACE" --timeout=180s
+    info "${init_job_name} Job does not exist; creating it now. Set FORCE_POSTGRES_INIT=1 on later runs to force recreation."
+    sed "s/name: postgres-init/name: ${init_job_name}/" k8s/postgres-init-job.yaml | "${KUBECTL[@]}" apply -f -
+    "${KUBECTL[@]}" wait --for=condition=complete "job/${init_job_name}" -n "$NAMESPACE" --timeout=180s
   fi
 
   "${KUBECTL[@]}" apply -f k8s/monitoring-backend-rbac.yaml
@@ -361,7 +394,7 @@ verify_running_backend_image() {
 }
 
 print_summary() {
-  printf '\nDeployment complete. Final cluster status:\n\n'
+  printf "\nDeployment complete. DB_MODE=%s, backend DB service=%s. Final cluster status:\n\n" "$DB_MODE" "$DB_SERVICE"
   "${KUBECTL[@]}" get pods -n "$NAMESPACE" -o wide
   printf '\n'
   "${KUBECTL[@]}" get services -n "$NAMESPACE"
@@ -372,7 +405,8 @@ print_summary() {
 
 Suggested verification commands:
   ./scripts/k8s-test-local.sh
-  ./scripts/k8s-status.sh
+  DB_MODE=${DB_MODE} ./scripts/k8s-status.sh
+  DB_MODE=${DB_MODE} ./scripts/k8s-postgres-ha-status.sh  # HA mode only
 
 If you need public browser access for the demo, continue using the existing iptables-based expose script:
   PUBLIC_PORT=3000 NODE_PORT=${NODE_PORT} ./scripts/k8s-expose-demo.sh
