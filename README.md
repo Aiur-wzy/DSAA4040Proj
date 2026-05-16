@@ -499,6 +499,101 @@ Kubernetes no longer runs one shared backend Deployment for every API path. Phas
 
 Both `k8s/ingress.yaml` and `frontend/nginx.conf` use the same path split: `/api/admin/cluster` routes to monitoring, `/api/admin` routes to admin, `/api` routes to public, and `/` serves the React SPA. This keeps direct Ingress access through `bookstore.local` and NodePort access through frontend Nginx consistent.
 
+## Distributed System Mode: PostgreSQL HA
+
+### Purpose
+
+`DB_MODE=ha` turns the database layer into an optional distributed, stateful high-availability experiment. The default workflow remains `DB_MODE=single`; use HA mode when you want to demonstrate PostgreSQL leader/follower replication, automatic failover, and retry-safe order placement.
+
+### Architecture
+
+```text
+Browser / API client
+  -> Ingress / Frontend Nginx
+  -> public-backend / admin-backend / monitoring-backend
+  -> bookstore-postgres-rw
+  -> CloudNativePG PostgreSQL HA cluster
+       primary: bookstore-postgres-1
+       replicas: bookstore-postgres-2, bookstore-postgres-3
+```
+
+In HA mode, CloudNativePG manages the `bookstore-postgres` cluster with three PostgreSQL instances: one primary and two replicas. The backend uses `DB_WRITE_HOST=bookstore-postgres-rw`, a stable read-write service that follows the current primary. CloudNativePG also exposes `bookstore-postgres-ro` for read-only replica traffic and `bookstore-postgres-r` across all instances; read splitting to `bookstore-postgres-ro` is a future optimization.
+
+### Distributed system concept mapping
+
+| Concept | Project implementation |
+| --- | --- |
+| Leader | CloudNativePG PostgreSQL primary |
+| Followers | PostgreSQL replicas |
+| Log replication | PostgreSQL WAL streaming |
+| Stable write endpoint | `bookstore-postgres-rw` |
+| Read-only replica endpoint | `bookstore-postgres-ro` |
+| Failover controller | CloudNativePG operator |
+| Partial failure retry protection | `Idempotency-Key` on `POST /api/orders` |
+| Strong consistency boundary | PostgreSQL transaction for order placement |
+
+### Consistency model
+
+Order placement, stock decrement, `order_items` creation, and cart cleanup are handled atomically by PostgreSQL transactions. `Idempotency-Key` prevents duplicate orders and duplicate stock decrement when a client retries after timeout, failover, or ambiguous partial failure. To preserve strong consistency for the demo, all application queries currently use the read-write service; read replica usage is future work because replicas may lag.
+
+### How to run HA mode
+
+Install the CloudNativePG operator before deploying with `DB_MODE=ha`:
+
+```bash
+./scripts/k8s-install-cnpg.sh
+```
+
+Optionally pre-pull the CloudNativePG PostgreSQL image into Minikube:
+
+```bash
+minikube ssh -- docker image inspect ghcr.io/cloudnative-pg/postgresql:16.4 >/dev/null 2>&1 \
+  && echo "OK: CNPG PostgreSQL image exists" \
+  || minikube ssh -- docker pull ghcr.io/cloudnative-pg/postgresql:16.4
+```
+
+Deploy and inspect HA mode:
+
+```bash
+DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh
+DB_MODE=ha ./scripts/k8s-postgres-ha-status.sh
+```
+
+### Verification commands
+
+```bash
+MINIKUBE_IP=$(minikube ip)
+
+curl -s http://$MINIKUBE_IP:30080/api/health
+curl -s http://$MINIKUBE_IP:30080/api/health/db
+curl -s http://$MINIKUBE_IP:30080/api/admin/cluster/status | python3 -m json.tool
+
+DB_MODE=ha BASE_URL=http://$MINIKUBE_IP:30080 ./scripts/test-api.sh
+DB_MODE=ha BASE_URL=http://$MINIKUBE_IP:30080 ./scripts/test-admin-api.sh
+BASE_URL=http://$MINIKUBE_IP:30080 ./scripts/test-order-consistency.sh
+DB_MODE=ha ./scripts/k8s-postgres-ha-failover-test.sh
+```
+
+### Expected evidence
+
+- CloudNativePG `Cluster` is healthy.
+- Three PostgreSQL instances are ready.
+- One instance is primary and two instances are replicas.
+- `bookstore-postgres-rw` points to the current primary.
+- `bookstore-postgres-ro` points to replicas.
+- `/api/health/db` returns `connected`.
+- `GET /api/admin/cluster/status` shows `db.mode=ha` and no DB warnings.
+- The idempotency test passes.
+- The failover test shows the old primary, new primary promotion, DB health recovery, preserved data, and post-failover write success.
+
+### Limitations and production migration
+
+Minikube is a resource-limited demo environment, not production-grade distributed infrastructure. Three PostgreSQL HA pods plus the application, Ingress, and `metrics-server` may require more memory, preferably 6GB+ if available, and Minikube may still place all PostgreSQL instances on one node without real production fault domains.
+
+For production, migrate to real multi-VM Kubernetes or managed Kubernetes with production-grade `LoadBalancer`/Ingress exposure, CSI storage, DNS/TLS, production secrets, an external image registry, backup/restore, Prometheus/Grafana monitoring, and disaster recovery planning. `DB_MODE=single` remains the stable default workflow.
+
+For deeper details, see [PostgreSQL HA experiment](docs/postgres_ha_experiment.md).
+
 ### 6.3 Kubernetes deployment verification
 
 After Minikube is running, use the rebuild/deploy helper for the full local-image Kubernetes workflow:
