@@ -27,6 +27,10 @@ sql_literal() {
   python3 -c "import sys; print(\"'\" + sys.argv[1].replace(\"'\", \"''\") + \"'\")" "$1"
 }
 
+trim_psql_output() {
+  python3 -c 'import sys; print(sys.stdin.read().strip())'
+}
+
 psql_rw() {
   local sql="$1"
   local client_pod="psql-rw-check-${RANDOM}-${RANDOM}"
@@ -46,7 +50,9 @@ psql_rw() {
       -d "$DB_NAME" \
       -X \
       -v ON_ERROR_STOP=1 \
-      -qAt \
+      -q \
+      -t \
+      -A \
       -c "$sql"
 }
 
@@ -128,8 +134,17 @@ pass "Backend DB health recovered through ${DB_HOST}"
 
 if [[ "$SKIP_WRITE_TEST" != "1" ]]; then
   marker_sql="$(sql_literal "$marker")"
-  post_read_result="$(psql_rw "SELECT 'post_read_count=' || count(*) FROM ha_failover_markers WHERE id=${marker_sql};")"
-  [[ "$post_read_result" == "post_read_count=1" ]] || fail "Pre-failure marker ${marker} was not found after failover; got: ${post_read_result}"
+  post_read_raw="$(psql_rw "SELECT COUNT(*) FROM ha_failover_markers WHERE id=${marker_sql};")"
+  post_read_count="$(printf '%s' "$post_read_raw" | trim_psql_output)"
+  post_read_result="post_read_count=${post_read_count}"
+  if ! [[ "$post_read_count" =~ ^[0-9]+$ ]] || (( post_read_count < 1 )); then
+    {
+      echo "DEBUG: raw psql output: ${post_read_raw}"
+      echo "DEBUG: parsed count: ${post_read_count}"
+      echo "DEBUG: marker value: ${marker}"
+    } >&2
+    fail "Pre-failure marker ${marker} was not found after failover; got: ${post_read_result}"
+  fi
   echo "Post-failover read result: ${post_read_result}"
   pass "Pre-failure data remains after failover"
 
