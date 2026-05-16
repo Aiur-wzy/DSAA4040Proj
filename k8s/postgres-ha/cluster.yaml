@@ -7,6 +7,16 @@ spec:
   instances: 3
   imageName: ghcr.io/cloudnative-pg/postgresql:16.4
 
+  # Prefer one PostgreSQL instance per Kubernetes node for distributed-system
+  # evidence. This stays a preference rather than a hard requirement so the
+  # same DB_MODE=ha manifest still starts on single-node or resource-limited
+  # Minikube. Ideal evidence is 3 PostgreSQL pods on 3 nodes; 2+ distinct
+  # nodes is acceptable when local resources constrain scheduling.
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: preferred
+
   bootstrap:
     initdb:
       database: bookstore

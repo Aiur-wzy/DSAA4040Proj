@@ -53,6 +53,59 @@ For orders and inventory, the bookstore chooses **CP/ACID** behavior over accept
    DB_MODE=ha ./scripts/k8s-postgres-ha-failover-test.sh
    ```
 
+## Multi-node Minikube evidence workflow
+
+Use this workflow when the goal is distributed-system evidence rather than only validating HA mechanics on a single Minikube node. It starts or reuses a dedicated three-node profile and then runs the HA deployment stages with `DB_MODE=ha`.
+
+### Commands
+
+```bash
+./scripts/k8s-distributed-ha-rebuild-all.sh
+
+MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-distributed-ha-evidence.sh
+MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-postgres-ha-failover-test.sh
+MINIKUBE_PROFILE=bookstore-distributed BASE_URL=http://$(minikube -p bookstore-distributed ip):30080 ./scripts/test-order-consistency.sh
+```
+
+The default profile settings are:
+
+```bash
+MINIKUBE_PROFILE=bookstore-distributed
+NODES=3
+CPUS=4
+MEMORY=6144
+DRIVER=docker
+DB_MODE=ha
+```
+
+### Expected outputs
+
+The evidence script prints seven staged sections:
+
+1. `[1/7] Kubernetes nodes` with three Minikube Kubernetes Nodes in `kubectl get nodes -o wide`.
+2. `[2/7] Bookstore pods with node placement` with application and PostgreSQL Pods plus their `NODE` column.
+3. `[3/7] CloudNativePG HA status` with the current primary, ready instances, services, and EndpointSlices.
+4. `[4/7] PostgreSQL primary/replica node distribution` with each `bookstore-postgres-*` Pod and its Kubernetes node.
+5. `[5/7] rw/ro EndpointSlices` showing `bookstore-postgres-rw` for the writable primary and `bookstore-postgres-ro` for read-only replicas.
+6. `[6/7] Application health and DB health` showing successful responses from `/api/health`, `/api/health/db`, and `/api/admin/cluster/status`.
+7. `[7/7] Evidence summary` with `STRONG PASS` when PostgreSQL uses three distinct nodes, `PASS` when it uses at least two, and `WARN` when all PostgreSQL Pods are on one node.
+
+The failover test additionally prints `oldPrimaryNode=<nodeName>`, `newPrimaryNode=<nodeName>`, and a final old/new primary summary. A different old/new node is strong node-level failover evidence; the test still passes with a warning if the scheduler used the same node because that still verifies CloudNativePG promotion and the `bookstore-postgres-rw` service path.
+
+### Screenshot checklist
+
+Capture screenshots or terminal excerpts for:
+
+- `minikube -p bookstore-distributed status`
+- `minikube -p bookstore-distributed kubectl -- get nodes -o wide`
+- `MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-distributed-ha-evidence.sh` sections `[3/7]` through `[7/7]`
+- `MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-postgres-ha-failover-test.sh` showing old/new primary Pods and nodes
+- `MINIKUBE_PROFILE=bookstore-distributed BASE_URL=http://$(minikube -p bookstore-distributed ip):30080 ./scripts/test-order-consistency.sh` showing idempotency success
+
+### Limitations
+
+Minikube multi-node still runs on one host, so it is a simulation of Kubernetes node placement rather than real machine, rack, zone, or regional isolation. Local CPU, memory, storage, and image-pull pressure can cause Kubernetes to place multiple PostgreSQL Pods on the same node even though the CloudNativePG manifest prefers anti-affinity on `kubernetes.io/hostname`. Ideal demo evidence is three PostgreSQL Pods on three nodes; two or more distinct nodes is acceptable under local resource constraints. Production requires real multi-VM Kubernetes or managed Kubernetes, CSI storage, backups, TLS, a registry, monitoring, alerting, and disaster recovery procedures.
+
 ## DB_MODE behavior
 
 - `DB_MODE=single` is the default. It applies the existing single PostgreSQL Deployment/PVC/service and uses `postgres-service`.
