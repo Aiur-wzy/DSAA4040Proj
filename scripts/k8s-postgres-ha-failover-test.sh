@@ -28,7 +28,7 @@ sql_literal() {
 }
 
 trim_psql_output() {
-  python3 -c 'import sys; print(sys.stdin.read().strip())'
+  python3 -c 'import re, sys; data=sys.stdin.read(); matches=re.findall(r"(?m)^\s*([0-9]+)\s*$", data); print(matches[-1] if matches else data.strip())'
 }
 
 psql_rw() {
@@ -81,7 +81,10 @@ pass "Backend DB health is initially OK"
 
 old_primary="$(${KUBECTL[@]} get cluster "$CLUSTER_NAME" -n "$NAMESPACE" -o jsonpath='{.status.currentPrimary}')"
 [[ -n "$old_primary" ]] || fail "Could not identify current primary pod"
+old_primary_node="$(${KUBECTL[@]} get pod "$old_primary" -n "$NAMESPACE" -o jsonpath='{.spec.nodeName}')"
+[[ -n "$old_primary_node" ]] || old_primary_node="unknown"
 echo "Old primary: ${old_primary}"
+echo "oldPrimaryNode=${old_primary_node}"
 
 pre_write_result="skipped"
 post_read_result="skipped"
@@ -115,9 +118,14 @@ while (( $(date +%s) < deadline )); do
 done
 [[ -n "$new_primary" && "$new_primary" != "$old_primary" ]] || fail "Timed out waiting for new primary after ${FAILOVER_TIMEOUT}s"
 echo "New primary: ${new_primary}"
+new_primary_node="$(${KUBECTL[@]} get pod "$new_primary" -n "$NAMESPACE" -o jsonpath='{.spec.nodeName}' 2>/dev/null || true)"
+[[ -n "$new_primary_node" ]] || new_primary_node="unknown"
+echo "newPrimaryNode=${new_primary_node}"
 pass "New primary promoted: ${new_primary}"
 
 "${KUBECTL[@]}" wait --for=condition=Ready "pod/${new_primary}" -n "$NAMESPACE" --timeout="${FAILOVER_TIMEOUT}s"
+new_primary_node="$(${KUBECTL[@]} get pod "$new_primary" -n "$NAMESPACE" -o jsonpath='{.spec.nodeName}' 2>/dev/null || true)"
+[[ -n "$new_primary_node" ]] || new_primary_node="unknown"
 pass "Current primary pod ${new_primary} is Ready"
 
 "${KUBECTL[@]}" wait --for=condition=Ready "cluster/${CLUSTER_NAME}" -n "$NAMESPACE" --timeout="${FAILOVER_TIMEOUT}s"
@@ -158,8 +166,13 @@ fi
 
 end_epoch="$(date +%s)"
 failover_duration="$((end_epoch - start_epoch))"
-echo "Old primary: ${old_primary}"
-echo "New primary: ${new_primary}"
+echo "Old primary: ${old_primary} on ${old_primary_node}"
+echo "New primary: ${new_primary} on ${new_primary_node}"
+if [[ "$old_primary_node" != "unknown" && "$new_primary_node" != "unknown" && "$old_primary_node" != "$new_primary_node" ]]; then
+  pass "failover promoted a primary on a different Kubernetes node"
+else
+  warn "failover succeeded, but old and new primary were on the same node; this still verifies HA logic, but not node-level isolation."
+fi
 echo "Failover duration: ${failover_duration} seconds"
 echo "Pre-failover write result: ${pre_write_result}"
 echo "Post-failover read result: ${post_read_result}"

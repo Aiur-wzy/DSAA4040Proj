@@ -499,6 +499,45 @@ Kubernetes no longer runs one shared backend Deployment for every API path. Phas
 
 Both `k8s/ingress.yaml` and `frontend/nginx.conf` use the same path split: `/api/admin/cluster` routes to monitoring, `/api/admin` routes to admin, `/api` routes to public, and `/` serves the React SPA. This keeps direct Ingress access through `bookstore.local` and NodePort access through frontend Nginx consistent.
 
+## Distributed System Mode: Multi-node PostgreSQL HA
+
+This is the recommended mode when you need clear distributed-system evidence for the bookstore project. It keeps `DB_MODE=single` as the stable default and adds an explicit multi-node experiment workflow instead of changing every Kubernetes script implicitly.
+
+Run the one-command workflow:
+
+```bash
+./scripts/k8s-distributed-ha-rebuild-all.sh
+```
+
+By default, the script uses:
+
+```bash
+MINIKUBE_PROFILE=bookstore-distributed
+NODES=3
+DB_MODE=ha
+```
+
+The workflow starts or reuses a three-node Minikube profile, deploys the CloudNativePG PostgreSQL HA cluster, deploys the application, and runs the distributed evidence script. It verifies:
+
+- multiple Kubernetes nodes with `kubectl get nodes -o wide`
+- PostgreSQL primary/replica Pod placement across Kubernetes nodes
+- CloudNativePG `bookstore-postgres-rw` and `bookstore-postgres-ro` EndpointSlices
+- failover evidence that reports the old primary Pod/node and new primary Pod/node
+- API health, database health, and cluster status endpoints
+- idempotent checkout behavior with `Idempotency-Key` via `scripts/test-order-consistency.sh`
+
+Useful follow-up checks after the workflow completes:
+
+```bash
+MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-distributed-ha-evidence.sh
+MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-postgres-ha-failover-test.sh
+MINIKUBE_PROFILE=bookstore-distributed BASE_URL=http://$(minikube -p bookstore-distributed ip):30080 ./scripts/test-order-consistency.sh
+```
+
+This is still a Minikube multi-node simulation on one host. It improves the evidence by showing multiple Kubernetes Nodes and preferred PostgreSQL Pod spreading, but it does not provide real physical fault isolation. Ideal evidence is three PostgreSQL Pods on three Kubernetes Nodes; two or more distinct nodes is acceptable under local resource constraints, and the evidence script warns rather than fails if the local scheduler places all instances together.
+
+For production, migrate to real multi-VM Kubernetes or managed Kubernetes with CSI-backed storage, backups, TLS, a real image registry, monitoring/alerting, and disaster recovery planning. Keep `DB_MODE=single` as the stable default for normal local development. Keep `DB_MODE=ha` on the default profile as a lighter HA-mechanism test when you do not need multi-node placement evidence.
+
 ## Distributed System Mode: PostgreSQL HA
 
 ### Purpose
