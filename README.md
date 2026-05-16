@@ -552,12 +552,26 @@ minikube ssh -- docker image inspect ghcr.io/cloudnative-pg/postgresql:16.4 >/de
   || minikube ssh -- docker pull ghcr.io/cloudnative-pg/postgresql:16.4
 ```
 
-Deploy and inspect HA mode:
+Deploy HA mode with the staged workflow:
 
 ```bash
-DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh
+DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh install-cnpg
+DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh apply-ha-database
+DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh init-db
+DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh deploy-app
+DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh verify-app
 DB_MODE=ha ./scripts/k8s-postgres-ha-status.sh
 ```
+
+#### One-command HA rebuild
+
+For convenience, the same safe HA stages can be run in order with one explicit wrapper:
+
+```bash
+./scripts/k8s-ha-rebuild-all.sh
+```
+
+The wrapper installs/checks CloudNativePG, applies/checks the HA PostgreSQL cluster, initializes the database only when needed, deploys the application, and verifies the application. It is still heavier than `DB_MODE=single`: HA mode runs three PostgreSQL instances plus the app, Ingress, metrics-server, and HPA, so 6GB+ Minikube memory is recommended. For debugging or lower-resource environments, run the staged commands individually. The wrapper preserves PVCs and does not reset the database unless you explicitly set `FORCE_POSTGRES_INIT=1`.
 
 ### Verification commands
 

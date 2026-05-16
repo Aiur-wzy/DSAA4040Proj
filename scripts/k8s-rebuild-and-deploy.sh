@@ -8,7 +8,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck source=scripts/lib/k8s.sh
 source "${SCRIPT_DIR}/lib/k8s.sh"
 
-NAMESPACE="bookstore"
+NAMESPACE="${NAMESPACE:-bookstore}"
 POSTGRES_IMAGE="postgres:16"
 NODE_PORT="30080"
 DB_MODE="${DB_MODE:-single}"
@@ -675,6 +675,9 @@ Run the HA deployment in smaller stages to reduce pressure on resource-limited s
   DB_MODE=ha ${0} init-db
   DB_MODE=ha ${0} deploy-app
   DB_MODE=ha ${0} verify-app
+
+Preferred one-command HA wrapper that runs those same safe stages in order:
+  ./scripts/k8s-ha-rebuild-all.sh
 
 If you intentionally want the old combined path, rerun with HA_ALLOW_ALL_IN_ONE=1.
 HA_PLAN
