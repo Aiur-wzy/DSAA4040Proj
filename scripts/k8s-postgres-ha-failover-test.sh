@@ -27,8 +27,8 @@ sql_literal() {
   python3 -c "import sys; print(\"'\" + sys.argv[1].replace(\"'\", \"''\") + \"'\")" "$1"
 }
 
-trim_psql_output() {
-  python3 -c 'import re, sys; data=sys.stdin.read(); matches=re.findall(r"(?m)^\s*([0-9]+)\s*$", data); print(matches[-1] if matches else data.strip())'
+extract_numeric_count() {
+  awk '/^[[:space:]]*[0-9]+[[:space:]]*$/ { value=$1 } END { print value }'
 }
 
 psql_rw() {
@@ -143,7 +143,7 @@ pass "Backend DB health recovered through ${DB_HOST}"
 if [[ "$SKIP_WRITE_TEST" != "1" ]]; then
   marker_sql="$(sql_literal "$marker")"
   post_read_raw="$(psql_rw "SELECT COUNT(*) FROM ha_failover_markers WHERE id=${marker_sql};")"
-  post_read_count="$(printf '%s' "$post_read_raw" | trim_psql_output)"
+  post_read_count="$(printf '%s\n' "$post_read_raw" | tr -d '\r' | extract_numeric_count)"
   post_read_result="post_read_count=${post_read_count}"
   if ! [[ "$post_read_count" =~ ^[0-9]+$ ]] || (( post_read_count < 1 )); then
     {
