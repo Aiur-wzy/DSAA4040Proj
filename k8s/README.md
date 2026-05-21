@@ -13,7 +13,7 @@ This folder contains the Kubernetes deployment for the DSAA 4040 bookstore syste
 - `public-backend-deployment.yaml` and `public-backend-service.yaml`: Run and expose the public/store API backend (`app=public-backend`) with 2 replicas.
 - `admin-backend-deployment.yaml` and `admin-backend-service.yaml`: Run and expose the admin catalog/inventory API backend (`app=admin-backend`) with 1 replica.
 - `monitoring-backend-deployment.yaml` and `monitoring-backend-service.yaml`: Run and expose the monitoring API backend (`app=monitoring-backend`) with 1 replica.
-- `monitoring-backend-rbac.yaml`: Gives only `ServiceAccount/bookstore-monitoring-backend` namespace-scoped read-only access to Pods, Deployments, HPAs, and Pod metrics.
+- `monitoring-backend-rbac.yaml`: Gives only `ServiceAccount/bookstore-monitoring-backend` namespace-scoped read-only access to Pods, Deployments, HPAs, CloudNativePG Clusters, and Events (core + events.k8s.io), plus Pod metrics.
 - `frontend-deployment.yaml`: Deploys the React build served through Nginx.
 - `frontend-service.yaml`: Exposes frontend as `frontend-service` (NodePort 30080) for Minikube demo testing.
 - `ingress.yaml`: Routes `bookstore.local` by API path.
@@ -66,6 +66,8 @@ The monitoring Role is namespace-scoped and grants only `get`, `list`, and `watc
 - Deployments
 - HorizontalPodAutoscalers
 - `metrics.k8s.io` Pods
+- CloudNativePG Clusters (`postgresql.cnpg.io`)
+- Events (`""/events` and `events.k8s.io/events`)
 
 No broad ClusterRoleBinding is required for the app monitoring endpoint.
 
