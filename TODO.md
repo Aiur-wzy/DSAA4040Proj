@@ -1,270 +1,156 @@
-# TODO / Verification Plan
+# TODO / Final Verification Plan
 
-This checklist replaces the old early-stage TODO and is aligned with the project proposal in
-`DSAD4040_Proj_Proposal.pdf` plus the current repository implementation.
+## Purpose
 
-Status labels:
+This document tracks final pre-submission work for the DSAA 4040 Cloud-Native Online Bookstore against:
 
-- `[x]` Completed / implemented in the repository.
-- `[~]` Needs runtime verification or final demo evidence.
-- `[ ]` Pending implementation work.
-- `[!]` Known limitation / future work.
+- project handout/guideline (`DSAA4040_Project_Handout_Original_English.pdf`);
+- project proposal (`DSAD4040_Proj_Proposal.pdf`);
+- current repository implementation;
+- runtime verification evidence from current scripts and docs.
 
-## Proposal Alignment Summary
+## Status Legend
 
-The proposal requires a cloud-native online bookstore with a frontend, backend API, and
-relational database; book browsing/search; shopping cart management; order placement with
-persistent data and correctness; containerization; Kubernetes Deployment/Service,
-ConfigMap, Secret, Ingress, autoscaling, health checks, basic monitoring, and lightweight
-performance testing; plus README/report/demo deliverables.
+- [x] Completed and verified
+- [~] Implemented but needs final demo/report evidence or polish
+- [ ] Pending before submission
+- [!] Known limitation / future work
 
-Repository status at this update:
+## Requirement Alignment Matrix
 
-- [x] Three-tier bookstore architecture is implemented.
-  Evidence: `frontend/`, `backend/app/`, `database/`, `docker-compose.yml`, and `k8s/`.
-- [x] Kubernetes backend has evolved from one backend Deployment into split public, admin,
-  and monitoring Deployments/Services.
-  Evidence: `k8s/public-backend-deployment.yaml`, `k8s/admin-backend-deployment.yaml`,
-  `k8s/monitoring-backend-deployment.yaml`, and matching Service manifests.
-- [x] HPA now targets `Deployment/public-backend` through `public-backend-hpa`.
-  Evidence: `k8s/hpa.yaml`.
-- [x] Kubernetes monitoring access is isolated to `monitoring-backend` through dedicated
-  read-only RBAC.
-  Evidence: `k8s/monitoring-backend-rbac.yaml`.
-- [~] Final report/demo evidence still needs to be captured from a live Minikube run.
-  Verify with the commands in [Final Runtime Verification](#final-runtime-verification).
+| Requirement | Source: Handout / Proposal / Implementation | Current Status | Evidence | Remaining Action |
+|---|---|---|---|---|
+| Frontend page | Handout Basic + Proposal + Implementation | [x] | `frontend/`, `README.md`, `scripts/test-api.sh` | Capture final report/demo screenshots |
+| Backend API | Handout Basic + Proposal + Implementation | [x] | `backend/app/routes/*`, `scripts/test-api.sh`, `scripts/test-admin-api.sh` | Add concise final evidence snippets into report |
+| Database | Handout Basic + Proposal + Implementation | [x] | `database/schema.sql`, `database/seed.sql`, `k8s/postgres-init-job.yaml` | Keep final DB correctness summary in report |
+| Docker containerization | Handout Basic + Proposal + Implementation | [x] | `backend/Dockerfile`, `frontend/Dockerfile`, `docker-compose.yml` | Re-run compose checklist once before submission |
+| Kubernetes Deployment and Service | Handout Basic + Proposal + Implementation | [x] | `k8s/*deployment.yaml`, `k8s/*service.yaml`, `scripts/k8s-test-local.sh` | Paste final `kubectl get` evidence into report |
+| Browse/search books | Handout Basic + Proposal + Implementation | [x] | `backend/app/routes/books.py`, `scripts/test-api.sh` | None beyond final report presentation |
+| Cart management | Handout Basic + Proposal + Implementation | [x] | `backend/app/routes/cart.py`, `scripts/test-api.sh` | None beyond final report presentation |
+| Order placement | Handout Basic + Proposal + Implementation | [x] | `backend/app/routes/orders.py`, `scripts/test-api.sh`, `scripts/test-order-consistency.sh` | Keep idempotency/stock result in report |
+| ConfigMap | Handout Standard + Implementation | [x] | `k8s/configmap.yaml` | None |
+| Secret | Handout Standard + Implementation | [x] | `k8s/secret.yaml`, `k8s/postgres-ha/app-secret.yaml` | Note demo-only secret scope in limitations |
+| Ingress | Handout Standard + Implementation | [x] | `k8s/ingress.yaml`, `scripts/k8s-fix-ingress.sh` | Keep live curl/route proof in final demo appendix |
+| Architecture diagram | Handout Standard + Proposal + Docs | [~] | `README.md`, `report/final_report.md`, `docs/distributed_network_flow.md` | Final clean diagram polish in report slides/Overleaf |
+| Complete deployment workflow | Handout Standard + Proposal + Implementation | [x] | `scripts/compose-*.sh`, `scripts/k8s-rebuild-and-deploy.sh`, `scripts/k8s-distributed-ha-rebuild-all.sh` | Final pass for README consistency |
+| Autoscaling | Handout Advanced + Implementation | [x] | `k8s/hpa.yaml`, `scripts/k8s-hpa-demo.sh`, `scripts/k8s-fix-metrics-server.sh` | Keep scale-out numbers/screenshots in report |
+| Basic monitoring/dashboard | Handout Advanced + Implementation | [x] | `backend/app/routes/cluster_status.py`, `frontend/src/components/MonitoringDashboard.jsx` | Emphasize lightweight scope (non-Prometheus) |
+| Improved DB schema / API design | Handout Advanced + Proposal + Implementation | [x] | `database/schema.sql`, split public/admin/monitoring backend design | Summarize rationale briefly in final report |
+| Small performance test | Handout Advanced + Implementation | [x] | `scripts/perf-test.sh`, `scripts/k8s-hpa-demo.sh` | Include one concise benchmark figure/table |
+| Final report/demo | Handout deliverable + Proposal | [~] | `report/final_report.md`, `docs/demo_manual.md` | Final editing, formatting, and live demo playbook polish |
 
-## Core Bookstore Functionality
+## Completed and Verified
 
-- [x] Book browsing and search are implemented.
-  Evidence: `backend/app/routes/books.py`, `frontend/src/components/BookList.jsx`.
-  Verify with: `BASE_URL=http://$(minikube ip):30080 ./scripts/test-api.sh`.
-- [x] Shopping cart add/update/delete/view flow is implemented.
-  Evidence: `backend/app/routes/cart.py`, `frontend/src/components/Cart.jsx`.
-  Verify with: `BASE_URL=http://$(minikube ip):30080 ./scripts/test-api.sh`.
-- [x] Order placement and order history are implemented.
-  Evidence: `backend/app/routes/orders.py`, `frontend/src/components/OrderHistory.jsx`.
-  Verify with: `BASE_URL=http://$(minikube ip):30080 ./scripts/test-api.sh`.
-- [!] This is a course-demo bookstore, not a production commerce system.
-  Future work: real authentication, user accounts, payment, tax, shipping, email, and fraud
-  workflows.
+- [x] Three-tier bookstore architecture.
+- [x] Docker Compose workflow.
+- [x] Kubernetes deployment workflow.
+- [x] Split backend deployments (`public-backend`, `admin-backend`, `monitoring-backend`).
+- [x] Public bookstore API.
+- [x] Admin API.
+- [x] Monitoring API (`/api/admin/cluster/status`).
+- [x] PostgreSQL schema and seed data.
+- [x] Order transaction logic.
+- [x] Idempotency-key behavior verified.
+- [x] Kubernetes NodePort access verified.
+- [x] ConfigMap and Secret.
+- [x] HPA declaration and successful runtime scale-out.
+- [x] Metrics-server repair workflow.
+- [x] CloudNativePG HA mode.
+- [x] Three-node PostgreSQL HA placement evidence.
+- [x] PostgreSQL failover test.
+- [x] Distributed network flow documentation.
+- [x] Optional public demo exposure script.
+- [x] Fresh-image verification in deployment script/workflow.
 
-## Database Design and Transaction Correctness
+## Implemented but Still Needs Final Evidence / Polishing
 
-- [x] PostgreSQL schema and constraints are implemented.
-  Evidence: `database/schema.sql`.
-- [x] Seed data is implemented.
-  Evidence: `database/seed.sql`.
-- [x] SQL transaction demo for order placement exists.
-  Evidence: `database/place_order.sql`.
-- [x] Kubernetes database initialization is implemented as an init Job, not a manual primary
-  setup path.
-  Evidence: `k8s/postgres-init-job.yaml`.
-- [x] Docker Compose initializes schema and seed automatically through PostgreSQL
-  entrypoint mounts.
-  Evidence: `docker-compose.yml`.
-- [~] Live transaction behavior should be verified before the final demo.
-  Verify with: `./scripts/test-api.sh` after starting Docker Compose or Kubernetes.
+- [~] Final report polishing.
+- [~] Final demo script/playbook.
+- [~] Final browser demo access from public IP (only if required by presentation environment).
+- [~] Final Overleaf report formatting.
+- [~] Final README consistency check after recent workflow changes.
+- [~] Optional new experiment: concurrent order stock consistency (`scripts/test-order-consistency.sh` exists; optional rerun for final appendix).
+- [ ] Optional new experiment: application-level order after DB failover (`scripts/test-order-after-failover.sh` not found).
+- [ ] Optional new experiment: split backend routing identity test (`scripts/test-routing-split.sh` not found).
 
-## Backend API
+## Pending Implementation Work
 
-- [x] FastAPI application is implemented with route registration controlled by
-  `BACKEND_MODE`.
-  Evidence: `backend/app/main.py`.
-- [x] Public APIs are implemented for health, books, cart, and orders.
-  Evidence: `backend/app/routes/health.py`, `backend/app/routes/books.py`,
-  `backend/app/routes/cart.py`, `backend/app/routes/orders.py`.
-- [x] Admin catalog APIs are implemented.
-  Evidence: `backend/app/routes/admin_books.py`.
-  Verify with: `BASE_URL=http://$(minikube ip):30080 ./scripts/test-admin-api.sh`.
-- [x] Kubernetes status API exists at `GET /api/admin/cluster/status`.
-  Evidence: `backend/app/routes/cluster_status.py`.
-  Verify with: `curl -s http://$(minikube ip):30080/api/admin/cluster/status | python3 -m json.tool`.
-- [!] Admin APIs are intentionally unauthenticated for the demo.
-  Future work: production authentication, authorization, audit logs, and stricter admin RBAC.
-
-## Frontend UI
-
-- [x] React/Vite storefront is implemented.
-  Evidence: `frontend/src/App.jsx`, `frontend/src/components/BookList.jsx`,
-  `frontend/src/components/Cart.jsx`, `frontend/src/components/OrderHistory.jsx`.
-- [x] Admin Demo page is implemented.
-  Evidence: `frontend/src/components/AdminBooks.jsx`.
-- [x] Monitoring Dashboard page is implemented.
-  Evidence: `frontend/src/components/MonitoringDashboard.jsx`.
-- [x] Frontend Nginx mirrors Kubernetes route splitting for NodePort/public demo paths.
-  Evidence: `frontend/nginx.conf`.
-- [~] Final browser screenshots should be captured for Store, Admin Demo, Monitoring
-  Dashboard, and public demo exposure.
-
-## Docker and Docker Compose
-
-- [x] Backend Dockerfile is implemented.
-  Evidence: `backend/Dockerfile`.
-- [x] Frontend Dockerfile is implemented.
-  Evidence: `frontend/Dockerfile`.
-- [x] Docker Compose workflow is implemented for `db`, `backend`, and `frontend`.
-  Evidence: `docker-compose.yml`, `scripts/compose-up.sh`, `scripts/compose-down.sh`,
-  `scripts/compose-status.sh`, `scripts/compose-logs.sh`.
-- [~] Compose should be smoke-tested before submission if the local environment has Docker.
-  Verify with: `./scripts/compose-up.sh`, then `./scripts/test-api.sh` and
-  `BASE_URL=http://localhost:8000 ./scripts/test-admin-api.sh`.
-
-## Kubernetes Deployment
-
-- [x] Namespace, PostgreSQL, frontend, and split backend Kubernetes manifests are
-  implemented.
-  Evidence: `k8s/namespace.yaml`, `k8s/postgres-deployment.yaml`,
-  `k8s/frontend-deployment.yaml`, `k8s/public-backend-deployment.yaml`,
-  `k8s/admin-backend-deployment.yaml`, `k8s/monitoring-backend-deployment.yaml`.
-- [x] Public backend Service is implemented.
-  Evidence: `k8s/public-backend-service.yaml`.
-- [x] Admin backend Service is implemented.
-  Evidence: `k8s/admin-backend-service.yaml`.
-- [x] Monitoring backend Service is implemented.
-  Evidence: `k8s/monitoring-backend-service.yaml`.
-- [x] Frontend NodePort Service is implemented for local/demo access.
-  Evidence: `k8s/frontend-service.yaml`.
-- [~] Final Kubernetes runtime state should be captured.
-  Verify with: `kubectl get deploy,svc,hpa,ingress -n bookstore`.
-
-## ConfigMap, Secret, and Persistent Storage
-
-- [x] Non-secret configuration is stored in a ConfigMap.
-  Evidence: `k8s/configmap.yaml`.
-- [x] Demo database credentials are stored in a Kubernetes Secret.
-  Evidence: `k8s/secret.yaml`.
-- [x] PostgreSQL persistent storage is implemented with a PVC.
-  Evidence: `k8s/postgres-deployment.yaml`.
-- [!] Secret usage is demo-level only.
-  Future work: external secret management, rotation, environment-specific credentials, and
-  sealed/encrypted secret workflows.
-
-## Ingress Routing and Public Demo Exposure
-
-- [x] Kubernetes Ingress path routing is implemented:
-  - `/api/admin/cluster` -> `monitoring-backend-service`
-  - `/api/admin` -> `admin-backend-service`
-  - `/api` -> `public-backend-service`
-  - `/` -> `frontend-service`
-  Evidence: `k8s/ingress.yaml`.
-- [x] Ingress repair/check script is implemented.
-  Evidence: `scripts/k8s-fix-ingress.sh`.
-- [x] Public demo exposure script is implemented.
-  Evidence: `scripts/k8s-expose-demo.sh`.
-- [~] Ingress and public demo routes need live evidence.
-  Verify with the Ingress and public exposure commands below.
-- [!] Public iptables/port exposure is demo-only.
-  Future work: cloud LoadBalancer, TLS, DNS, and production ingress hardening.
-
-## HPA Autoscaling and Metrics Server
-
-- [x] HPA is implemented for `public-backend` with min/max replicas.
-  Evidence: `k8s/hpa.yaml`.
-- [x] metrics-server repair/check script exists.
-  Evidence: `scripts/k8s-fix-metrics-server.sh`.
-- [x] Repeatable HPA demo script exists.
-  Evidence: `scripts/k8s-hpa-demo.sh`.
-- [~] HPA before/under-load/after-load evidence still needs to be captured from a live
-  Minikube run.
-  Verify with: `./scripts/k8s-hpa-demo.sh`.
-- [~] metrics-server working evidence still needs to be captured.
-  Verify with: `./scripts/k8s-fix-metrics-server.sh` and `kubectl top pods -n bookstore`.
-
-## Monitoring Dashboard and Admin Demo
-
-- [x] Monitoring backend exposes public-backend Deployment, HPA, Pod, and metrics status.
-  Evidence: `backend/app/routes/cluster_status.py`.
-- [x] Monitoring backend uses a dedicated read-only ServiceAccount/Role/RoleBinding.
-  Evidence: `k8s/monitoring-backend-rbac.yaml`.
-- [x] Monitoring Dashboard is implemented in the frontend.
-  Evidence: `frontend/src/components/MonitoringDashboard.jsx`.
-- [x] Admin Demo frontend and backend routes are implemented.
-  Evidence: `frontend/src/components/AdminBooks.jsx`, `backend/app/routes/admin_books.py`.
-- [!] Monitoring Dashboard is lightweight and frontend-history based, not a Prometheus or
-  Grafana deployment.
-  Future work: Prometheus, Grafana, alerting, persistent metrics, and SLO dashboards.
-
-## Testing, Verification, and Documentation
-
-- [x] API smoke test script is implemented.
-  Evidence: `scripts/test-api.sh`.
-- [x] Admin API smoke test script is implemented.
-  Evidence: `scripts/test-admin-api.sh`.
-- [x] Kubernetes full update script is implemented.
-  Evidence: `scripts/k8s-full-update.sh`.
-- [x] Kubernetes status/test helper scripts are implemented.
-  Evidence: `scripts/k8s-status.sh`, `scripts/k8s-test-local.sh`, `scripts/monitor-k8s.sh`.
-- [x] Demo and architecture documentation exists.
-  Evidence: `README.md`, `k8s/README.md`, `docs/demo_manual.md`,
-  `docs/architecture_and_defense_notes.md`.
-- [~] Final report evidence should be copied into `report/final_report.md` before
-  submission.
-
-## Final Runtime Verification
-
-Run these commands from the repository root when Minikube is available. Do not run the heavy
-Kubernetes scripts during simple documentation edits unless a live cluster is intentionally
-being tested.
-
-```bash
-./scripts/k8s-full-update.sh
-
-BASE_URL=http://$(minikube ip):30080 ./scripts/test-api.sh
-
-BASE_URL=http://$(minikube ip):30080 ./scripts/test-admin-api.sh
-
-curl -s http://$(minikube ip):30080/api/admin/cluster/status | python3 -m json.tool
-
-./scripts/k8s-fix-metrics-server.sh
-
-./scripts/k8s-fix-ingress.sh
-
-./scripts/k8s-hpa-demo.sh
-
-PUBLIC_PORT=3000 NODE_PORT=30080 ./scripts/k8s-expose-demo.sh
-
-curl -i -H "Host: bookstore.local" http://$(minikube ip)/
-curl -i -H "Host: bookstore.local" http://$(minikube ip)/api/books
-curl -i -H "Host: bookstore.local" http://$(minikube ip)/api/admin/cluster/status
-```
-
-## Final Screenshot / Evidence Checklist
-
-- [~] Store page screenshot.
-- [~] Admin page screenshot.
-- [~] Monitoring Dashboard screenshot.
-- [~] `kubectl get deploy,svc,hpa,ingress -n bookstore` output.
-- [~] Ingress route `curl` output.
-- [~] HPA before-load, under-load, and after-load output.
-- [~] `public-backend` scaling evidence.
-- [~] metrics-server working evidence.
-- [~] ingress-nginx-controller running evidence.
-- [~] Public browser demo screenshot.
-- [~] API smoke test output.
+- [ ] `scripts/test-concurrent-orders.sh` (absent).
+- [ ] `scripts/test-order-after-failover.sh` (absent).
+- [ ] `scripts/test-routing-split.sh` (absent).
+- [x] `scripts/k8s-check-demo-exposure.sh` exists.
+- [~] Check and add any missing README/docs links if new verification scripts are added.
+- [~] Ensure final report sections are fully updated with latest HA/HPA/demo exposure evidence.
 
 ## Known Limitations / Future Work
 
-- [!] Admin Demo is unauthenticated and intended for controlled course-demo use only.
-- [!] Monitoring Dashboard is lightweight and frontend-history only, not Prometheus/Grafana.
-- [!] The target runtime is a Minikube single-node demo environment, not a multi-node
-  production cluster.
-- [!] Public iptables/port exposure is demo-only and should be replaced with a cloud
-  LoadBalancer or production ingress setup for real deployment.
-- [!] Kubernetes Secret usage is demo-level, not production-grade external secret management.
-- [!] The bookstore does not include real payment, shipping, production auth, or account
-  management.
-- [!] Future improvements: CI/CD, TLS, cloud LoadBalancer, Prometheus/Grafana, production
-  auth/RBAC, NetworkPolicy, backup/restore, and stronger database migration tooling.
+- [!] Minikube multi-node is simulated on one VM, not real physical multi-machine fault isolation.
+- [!] Admin API has no production authentication.
+- [!] Demo Secrets are not production-grade secret management.
+- [!] Public exposure through iptables/socat is demo-only.
+- [!] No TLS/HTTPS in demo endpoint.
+- [!] No production Ingress controller / LoadBalancer setup.
+- [!] No Prometheus/Grafana stack; monitoring dashboard is lightweight.
+- [!] Application currently uses PostgreSQL `rw` service for queries; `ro` read splitting is future work.
+- [!] No backup/restore disaster recovery workflow.
+- [!] No CI/CD image registry pipeline.
+- [!] No payment, shipping, real users, or commerce-grade security.
 
+## Final Verification Checklist
 
-## PostgreSQL HA / Distributed Database Experiment
+### Compose
 
-- [~] PostgreSQL HA runtime verification needs to be captured from a live `DB_MODE=ha` run.
-  Verify with: `DB_MODE=ha ./scripts/k8s-postgres-ha-status.sh`.
-- [~] Failover test evidence needs to be captured after CloudNativePG is installed.
-  Verify with: `DB_MODE=ha ./scripts/k8s-postgres-ha-failover-test.sh`.
-- [~] Idempotency retry evidence needs to be captured against a running backend.
-  Verify with: `BASE_URL=http://$(minikube ip):30080 ./scripts/test-order-consistency.sh`.
-- [~] DB HA Monitoring screenshot should be captured from the Monitoring Dashboard in HA mode.
-- [!] Production-grade DB HA requires real multi-VM Kubernetes or managed PostgreSQL validation, production storage, backups, TLS, monitoring, and disaster recovery testing.
+- `./scripts/compose-up.sh`
+- `./scripts/compose-status.sh`
+- `./scripts/test-api.sh`
+- `./scripts/test-admin-api.sh`
+- `./scripts/compose-down.sh`
+
+### Kubernetes single/default
+
+- `./scripts/k8s-rebuild-and-deploy.sh`
+- `./scripts/k8s-test-local.sh`
+- `./scripts/k8s-status.sh`
+
+### Distributed HA
+
+- `MINIKUBE_PROFILE=bookstore-distributed ./scripts/k8s-prepare-cnpg-local-storage.sh`
+- `AUTO_FIX_CNPG_PVC_PERMISSIONS=1 MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh apply-ha-database`
+- `MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh init-db`
+- `MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh deploy-app`
+- `MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh verify-app`
+- `MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-distributed-ha-evidence.sh`
+- `MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-postgres-ha-status.sh`
+- `MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-postgres-ha-failover-test.sh`
+
+### HPA
+
+- `MINIKUBE_PROFILE=bookstore-distributed ./scripts/k8s-fix-metrics-server.sh`
+- `MINIKUBE_PROFILE=bookstore-distributed DURATION=240s CONCURRENCY=30 ./scripts/k8s-hpa-demo.sh`
+
+### Public demo exposure
+
+- `EXPOSE_DEMO=1 ... ./scripts/k8s-distributed-ha-rebuild-all.sh`
+- or:
+- `MINIKUBE_PROFILE=bookstore-distributed PUBLIC_PORT=3000 NODE_PORT=30080 ./scripts/k8s-expose-demo.sh`
+- `MINIKUBE_PROFILE=bookstore-distributed PUBLIC_PORT=3000 NODE_PORT=30080 ./scripts/k8s-check-demo-exposure.sh`
+
+## Report/Demo Checklist
+
+- [ ] Architecture summary.
+- [ ] Request/network flow summary.
+- [ ] Functional API results.
+- [ ] Admin API results.
+- [ ] Idempotency result.
+- [ ] Kubernetes status result.
+- [ ] HA placement result.
+- [ ] Failover result.
+- [ ] HPA result.
+- [ ] Limitations section.
+
+## Safety Rules
+
+- Do not run `minikube delete` unless intentionally rebuilding a profile.
+- Do not delete PVCs or CloudNativePG clusters with real data.
+- `FORCE_DELETE_DANGLING_CNPG_PVC` is only for failed fresh initialization.
+- Public exposure should expose only `frontend-service`, not PostgreSQL or backend ClusterIP services.
