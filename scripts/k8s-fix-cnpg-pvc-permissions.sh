@@ -13,6 +13,10 @@ CNPG_POSTGRES_IMAGE="${CNPG_POSTGRES_IMAGE:-ghcr.io/cloudnative-pg/postgresql:16
 KEEP_REPAIR_JOB="${KEEP_REPAIR_JOB:-0}"
 FORCE_CNPG_PVC_REPAIR="${FORCE_CNPG_PVC_REPAIR:-0}"
 FORCE_DELETE_DANGLING_CNPG_PVC="${FORCE_DELETE_DANGLING_CNPG_PVC:-0}"
+CLUSTER_MANIFEST="${CLUSTER_MANIFEST:-k8s/postgres-ha/cluster.yaml}"
+if [[ "${DISTRIBUTED_HA_MODE:-0}" == "1" ]]; then
+  CLUSTER_MANIFEST="k8s/postgres-ha/cluster-distributed.yaml"
+fi
 
 info(){ printf '\n[stage] %s\n' "$*"; }
 warn(){ printf 'WARN: %s\n' "$*" >&2; }
@@ -97,15 +101,23 @@ if [[ "$probe_logs" == *HAS_PG_VERSION* && "$FORCE_CNPG_PVC_REPAIR" != "1" ]]; t
 fi
 
 if [[ "$FORCE_DELETE_DANGLING_CNPG_PVC" == "1" ]]; then
-  info "FORCE_DELETE_DANGLING_CNPG_PVC=1 requested"
-  [[ "$ready" != "True" ]] || fail "Refusing delete: cluster Ready=True"
-  [[ "$pod_phase" != "Running" ]] || fail "Refusing delete: pod $PVC_NAME running"
-  [[ "$probe_logs" != *HAS_PG_VERSION* || "$FORCE_CNPG_PVC_REPAIR" == "1" ]] || fail "Refusing delete: DB appears initialized"
-  warn "Deleting dangling PVC ${PVC_NAME}. This is only safe for failed NEW initialization."
-  "${KUBECTL[@]}" delete pvc -n "$NAMESPACE" "$PVC_NAME"
-  ts="$(date -u +%Y%m%dT%H%M%SZ)"
-  "${KUBECTL[@]}" annotate cluster -n "$NAMESPACE" "$CLUSTER_NAME" "cnpg-reconcile-at=${ts}" --overwrite
-  info "PVC deleted and reconcile annotation applied."
+  warn "Last-resort recovery for FAILED BRAND-NEW initialization only. This path recreates Cluster/${CLUSTER_NAME}; do not use on real data."
+  [[ "$ready" != "True" ]] || fail "Refusing recovery: cluster Ready=True"
+  [[ "$probe_logs" != *HAS_PG_VERSION* || "$FORCE_CNPG_PVC_REPAIR" == "1" ]] || fail "Refusing recovery: DB appears initialized"
+
+  info "Deleting Cluster/${CLUSTER_NAME} to recover from unrecoverable dangling-PVC state"
+  "${KUBECTL[@]}" delete cluster -n "$NAMESPACE" "$CLUSTER_NAME" --ignore-not-found
+
+  info "Waiting for related CNPG resources to disappear"
+  "${KUBECTL[@]}" wait --for=delete pod -l "cnpg.io/cluster=${CLUSTER_NAME}" -n "$NAMESPACE" --timeout=240s || true
+  "${KUBECTL[@]}" wait --for=delete job -l "cnpg.io/cluster=${CLUSTER_NAME}" -n "$NAMESPACE" --timeout=240s || true
+  "${KUBECTL[@]}" wait --for=delete pvc -l "cnpg.io/cluster=${CLUSTER_NAME}" -n "$NAMESPACE" --timeout=240s || true
+
+  info "Reapplying ${CLUSTER_MANIFEST}"
+  "${KUBECTL[@]}" apply -f "$CLUSTER_MANIFEST"
+  info "Waiting for Cluster/${CLUSTER_NAME} Ready=True"
+  "${KUBECTL[@]}" wait --for=condition=Ready "cluster/${CLUSTER_NAME}" -n "$NAMESPACE" --timeout=300s
+  info "Cluster recreation recovery completed."
   exit 0
 fi
 

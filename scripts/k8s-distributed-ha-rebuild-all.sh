@@ -79,6 +79,9 @@ MINIKUBE_PROFILE="$MINIKUBE_PROFILE" DB_MODE=ha ./scripts/k8s-rebuild-and-deploy
 
 preload_cnpg_postgres_image
 
+info "=== Prepare CNPG local storage ==="
+MINIKUBE_PROFILE="$MINIKUBE_PROFILE" NAMESPACE="${NAMESPACE:-bookstore}" STORAGE_CLASS="${STORAGE_CLASS:-bookstore-cnpg-local}" CLUSTER_NAME="${CLUSTER_NAME:-bookstore-postgres}" ./scripts/k8s-prepare-cnpg-local-storage.sh
+
 if ! run_stage apply-ha-database; then
   exit 1
 fi
