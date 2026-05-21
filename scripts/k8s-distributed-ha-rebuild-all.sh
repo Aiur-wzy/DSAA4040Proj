@@ -10,6 +10,11 @@ MEMORY="${MEMORY:-6144}"
 DRIVER="${DRIVER:-docker}"
 DB_MODE="${DB_MODE:-ha}"
 CNPG_POSTGRES_IMAGE="${CNPG_POSTGRES_IMAGE:-ghcr.io/cloudnative-pg/postgresql:16.4}"
+EXPOSE_DEMO="${EXPOSE_DEMO:-0}"
+NAMESPACE="${NAMESPACE:-bookstore}"
+SERVICE="${SERVICE:-frontend-service}"
+NODE_PORT="${NODE_PORT:-30080}"
+PUBLIC_PORT="${PUBLIC_PORT:-3000}"
 
 if [[ "$DB_MODE" != "ha" ]]; then
   echo "Error: Distributed HA workflow requires DB_MODE=ha (got DB_MODE=${DB_MODE})." >&2
@@ -91,6 +96,55 @@ run_stage verify-app
 
 info "=== Distributed HA evidence ==="
 MINIKUBE_PROFILE="$MINIKUBE_PROFILE" DB_MODE=ha ./scripts/k8s-distributed-ha-evidence.sh
+
+if [[ "${EXPOSE_DEMO}" == "1" ]]; then
+  info "=== expose-demo ==="
+  echo "Validating preconditions before public demo exposure..."
+  if ! mk kubectl -- get service "${SERVICE}" -n "${NAMESPACE}" >/dev/null 2>&1; then
+    echo "Error: service '${SERVICE}' not found in namespace '${NAMESPACE}'. Aborting public demo exposure." >&2
+    exit 1
+  fi
+
+  service_type="$(mk kubectl -- get service "${SERVICE}" -n "${NAMESPACE}" -o jsonpath='{.spec.type}')"
+  if [[ "${service_type}" != "NodePort" ]]; then
+    echo "Error: service '${SERVICE}' type is '${service_type}', expected 'NodePort'. Aborting public demo exposure." >&2
+    exit 1
+  fi
+
+  actual_node_port="$(mk kubectl -- get service "${SERVICE}" -n "${NAMESPACE}" -o jsonpath='{.spec.ports[0].nodePort}')"
+  if [[ "${actual_node_port}" != "${NODE_PORT}" ]]; then
+    echo "Error: service '${SERVICE}' nodePort is '${actual_node_port}', expected '${NODE_PORT}'. Aborting public demo exposure." >&2
+    exit 1
+  fi
+
+  MINIKUBE_IP_FOR_DEMO="$(mk ip)"
+  INTERNAL_URL="http://${MINIKUBE_IP_FOR_DEMO}:${NODE_PORT}/"
+  if ! curl -fsSI "${INTERNAL_URL}" >/dev/null; then
+    echo "Error: internal NodePort check failed (${INTERNAL_URL}). Aborting public demo exposure." >&2
+    exit 1
+  fi
+  echo "Internal NodePort check passed: ${INTERNAL_URL}"
+
+  MINIKUBE_PROFILE="$MINIKUBE_PROFILE" PUBLIC_PORT="${PUBLIC_PORT}" NODE_PORT="${NODE_PORT}" ./scripts/k8s-expose-demo.sh
+
+  cat <<EOF_EXPOSE
+Post-exposure verification:
+  Internal NodePort URL: http://${MINIKUBE_IP_FOR_DEMO}:${NODE_PORT}
+  Public demo URL: http://<server-public-ip>:${PUBLIC_PORT}
+
+Running iptables checks:
+EOF_EXPOSE
+
+  sudo iptables -t nat -L PREROUTING -n -v --line-numbers | grep "${PUBLIC_PORT}" || true
+  sudo iptables -t nat -L POSTROUTING -n -v --line-numbers | grep "${NODE_PORT}" || true
+  sudo iptables -L FORWARD -n -v --line-numbers | grep "${NODE_PORT}" || true
+  sudo iptables -L DOCKER-USER -n -v --line-numbers | grep "${NODE_PORT}" || true
+
+  echo "Cloud firewall/security group must allow inbound TCP ${PUBLIC_PORT}."
+  echo "Use http://, not https://, for this demo endpoint."
+else
+  echo "Skipping public demo exposure. Set EXPOSE_DEMO=1 to expose frontend-service."
+fi
 
 MINIKUBE_IP="$(mk ip)"
 cat <<EOF_NEXT

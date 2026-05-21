@@ -130,6 +130,20 @@ MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-rebuild-and-depl
 AUTO_FIX_CNPG_PVC_PERMISSIONS=1 MINIKUBE_PROFILE=bookstore-distributed NODES=3 CPUS=2 MEMORY=4096 DB_MODE=ha ./scripts/k8s-distributed-ha-rebuild-all.sh
 ```
 
+Optional public demo exposure at the end of the one-command HA workflow:
+
+```bash
+EXPOSE_DEMO=1 \
+PUBLIC_PORT=3000 \
+NODE_PORT=30080 \
+MINIKUBE_PROFILE=bookstore-distributed \
+NODES=3 \
+CPUS=2 \
+MEMORY=4096 \
+DB_MODE=ha \
+./scripts/k8s-distributed-ha-rebuild-all.sh
+```
+
 ---
 
 ## 8) Required Image Loading Notes (HA profile recreation)
@@ -198,11 +212,18 @@ Failover test behavior summary:
 
 ```bash
 PUBLIC_PORT=3000 NODE_PORT=30080 MINIKUBE_PROFILE=bookstore-distributed ./scripts/k8s-expose-demo.sh
+MINIKUBE_PROFILE=bookstore-distributed PUBLIC_PORT=3000 NODE_PORT=30080 ./scripts/k8s-check-demo-exposure.sh
 ```
 
 Then open: `http://<server-public-ip>:3000`
 
 Cloud firewall/security group must allow inbound **TCP 3000**.
+Use `http://`, not `https://`, for this demo endpoint.
+
+Public exposure scope/safety:
+- Exposes only `frontend-service` NodePort through the selected public port.
+- Does **not** expose backend services or PostgreSQL publicly.
+- If internal NodePort works but public access fails, check cloud firewall/security-group rules and iptables packet counters.
 
 (See `docs/public_exposure.md` and `docs/demo_manual.md` for detailed manual networking guidance.)
 
@@ -238,6 +259,7 @@ Cloud firewall/security group must allow inbound **TCP 3000**.
 | `scripts/test-order-consistency.sh` | Order consistency checks | K8s / HA validation |
 | `scripts/k8s-fix-metrics-server.sh` | Repair/check metrics-server | K8s ops |
 | `scripts/k8s-expose-demo.sh` | Expose NodePort to public host port for demo | Public demo |
+| `scripts/k8s-check-demo-exposure.sh` | Verify NodePort and host forwarding rules for public demo | Public demo |
 | `scripts/k8s-reset-local.sh` (or reset helpers) | Local reset/cleanup helper | Local recovery |
 
 ---
@@ -274,6 +296,7 @@ Cloud firewall/security group must allow inbound **TCP 3000**.
 - [Architecture and defense notes](docs/architecture_and_defense_notes.md)
 - [PostgreSQL HA experiment notes](docs/postgres_ha_experiment.md)
 - [Distributed HA runbook](docs/distributed_ha_runbook.md)
+- [Distributed network flow](docs/distributed_network_flow.md)
 - [Troubleshooting details](docs/troubleshooting.md)
 - [Public exposure guide](docs/public_exposure.md)
 - [HPA demo guide](docs/hpa_demo.md)
