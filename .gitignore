@@ -1,28 +1,46 @@
-# Python
+# Python caches/artifacts
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# Virtual environments
-.env
-.env.*
+# Python virtual environments
 .venv/
 venv/
+env/
 
-# Node
+# Env files (keep example)
+.env
+.env.*
+!.env.example
+
+# Node/frontend artifacts
 node_modules/
-dist/
-build/
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+
+# Logs/runtime outputs
+*.log
+nohup.out
+pull-*.log
+bookstore-socat-*.log
+
+# Temp files/dirs
+tmp/
+temp/
+.tmp/
+*.tmp
+*~
+*.swp
+*.swo
 
 # OS / editors
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
-
-# Logs
-*.log
 
 # Local database/data files
 data/
