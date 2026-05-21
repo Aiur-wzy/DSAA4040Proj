@@ -98,9 +98,9 @@ Notes:
 
 ---
 
-## 7) Distributed System Mode: Multi-node PostgreSQL HA (Optional Experiment)
+## 7) Distributed System Mode: Multi-node PostgreSQL HA
 
-Use this mode for distributed-system/failover evidence collection.
+Use this mode for distributed-system/failover evidence collection. For final demo and final verification, prefer the one-command workflow first, and use the staged workflow as a debugging path when you need to isolate a failing step.
 
 - Profile: `MINIKUBE_PROFILE=bookstore-distributed`
 - Typical target: `NODES=3` (resource permitting)
@@ -108,7 +108,38 @@ Use this mode for distributed-system/failover evidence collection.
 - Requires pre-prepared local storage with UID/GID `26:26` to avoid hostPath permission failures
 - Still a **single-host Minikube simulation**, not true physical fault isolation
 
-### Recommended staged workflow (easier debugging)
+### 7.1 One-command distributed HA workflow
+
+Recommended for demo/final verification:
+
+```bash
+AUTO_FIX_CNPG_PVC_PERMISSIONS=1 \
+EXPOSE_DEMO=1 \
+PUBLIC_PORT=3000 \
+NODE_PORT=30080 \
+MINIKUBE_PROFILE=bookstore-distributed \
+NODES=3 \
+CPUS=2 \
+MEMORY=4096 \
+DB_MODE=ha \
+./scripts/k8s-distributed-ha-rebuild-all.sh
+```
+
+This workflow performs:
+1. start/reuse Minikube multi-node profile;
+2. run image preflight;
+3. install/check CloudNativePG operator;
+4. prepare CNPG local storage;
+5. create HA PostgreSQL;
+6. init DB;
+7. deploy app;
+8. verify app;
+9. collect distributed HA evidence;
+10. optionally expose frontend demo.
+
+### 7.2 Staged distributed HA workflow
+
+Use staged execution when debugging specific failures.
 
 ```bash
 MINIKUBE_PROFILE=bookstore-distributed ./scripts/k8s-prepare-cnpg-local-storage.sh
@@ -124,48 +155,62 @@ MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-rebuild-and-depl
 MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh verify-app
 ```
 
-### One-command workflow
+### 7.3 Safe fresh rebuild without deleting Minikube
+
+For a clean HA re-run, prefer deleting only the `bookstore` namespace and preserving the Minikube profile.
+
+- Delete only namespace `bookstore` and re-run the deployment flow.
+- Do **not** run `minikube delete` for normal fresh rebuilds.
+- Optionally clean demo PV/local data only when no real data needs to be preserved.
+
+### 7.4 Optional public demo exposure
+
+The one-command workflow can expose the frontend automatically when `EXPOSE_DEMO=1` is set.
+
+Manual exposure/check commands are still available:
 
 ```bash
-AUTO_FIX_CNPG_PVC_PERMISSIONS=1 MINIKUBE_PROFILE=bookstore-distributed NODES=3 CPUS=2 MEMORY=4096 DB_MODE=ha ./scripts/k8s-distributed-ha-rebuild-all.sh
+PUBLIC_PORT=3000 NODE_PORT=30080 MINIKUBE_PROFILE=bookstore-distributed ./scripts/k8s-expose-demo.sh
+MINIKUBE_PROFILE=bookstore-distributed PUBLIC_PORT=3000 NODE_PORT=30080 ./scripts/k8s-check-demo-exposure.sh
 ```
 
-Optional public demo exposure at the end of the one-command HA workflow:
+Then open: `http://<server-public-ip>:3000`
 
-```bash
-EXPOSE_DEMO=1 \
-PUBLIC_PORT=3000 \
-NODE_PORT=30080 \
-MINIKUBE_PROFILE=bookstore-distributed \
-NODES=3 \
-CPUS=2 \
-MEMORY=4096 \
-DB_MODE=ha \
-./scripts/k8s-distributed-ha-rebuild-all.sh
-```
+Cloud firewall/security group must allow inbound **TCP 3000**.
+Use `http://`, not `https://`, for this demo endpoint.
 
 ---
 
-## 8) Required Image Loading Notes (HA profile recreation)
+## 8) Image Preflight and Minikube Image Loading
 
-If the Minikube profile is deleted/recreated, load required images again:
+A Docker image existing on the host does **not** mean the same image is already available inside Minikube.
+
+The deployment workflow now runs image preflight automatically. You can also run it manually:
 
 ```bash
-minikube -p bookstore-distributed image load ghcr.io/cloudnative-pg/cloudnative-pg:1.24.4
-minikube -p bookstore-distributed image load ghcr.io/cloudnative-pg/postgresql:16.4
-minikube -p bookstore-distributed image load postgres:16
-minikube -p bookstore-distributed image load bookstore-backend:latest
-minikube -p bookstore-distributed image load bookstore-frontend:latest
+MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-preload-images.sh
 ```
 
-- `cloudnative-pg` image: CNPG operator
-- `postgresql:16.4`: HA database pods
-- `postgres:16`: init job / psql client
-- `bookstore-*`: application images
+Optional auto-pull for missing images:
+
+```bash
+PULL_MISSING_IMAGES=1 MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-preload-images.sh
+```
+
+Required images:
+- `bookstore-backend:latest`
+- `bookstore-frontend:latest`
+- `postgres:16`
+- `ghcr.io/cloudnative-pg/cloudnative-pg:1.24.4`
+- `ghcr.io/cloudnative-pg/postgresql:16.4`
 
 ---
 
 ## 9) Verification
+
+After `k8s-distributed-ha-rebuild-all.sh` completes successfully, the main application should already be running.
+
+Failover, HPA, order consistency, and API/Admin tests are evaluation/demo scripts that you run separately after the core deployment is confirmed.
 
 ### Basic checks
 
@@ -253,25 +298,30 @@ Then open the Monitoring page in the frontend UI.
 
 ---
 
-## 12) Script Reference
+## Appendix A: Script List
 
-| Script | Purpose | Typical mode |
+| Script | Purpose | Typical Usage |
 |---|---|---|
-| `scripts/k8s-rebuild-and-deploy.sh` | Rebuild images, load to Minikube, apply manifests, verify deployment | Single default / HA staged |
-| `scripts/k8s-distributed-ha-rebuild-all.sh` | One-command distributed HA rebuild/deploy flow | HA experiment |
-| `scripts/k8s-prepare-cnpg-local-storage.sh` | Prepare local storage permissions for CNPG (`26:26`) | HA experiment |
-| `scripts/k8s-install-cnpg.sh` | Install CloudNativePG operator | HA experiment |
-| `scripts/k8s-postgres-ha-status.sh` | Print CNPG/HA database status | HA experiment |
-| `scripts/k8s-postgres-ha-failover-test.sh` | Controlled primary-pod failover validation | HA experiment |
-| `scripts/k8s-distributed-ha-evidence.sh` | Collect distributed/HA evidence snapshot | HA experiment |
-| `scripts/k8s-test-local.sh` | Local Kubernetes smoke tests | Single default / HA |
-| `scripts/test-api.sh` | Public API tests | Compose / K8s |
-| `scripts/test-admin-api.sh` | Admin API tests | Compose / K8s |
-| `scripts/test-order-consistency.sh` | Order consistency checks | K8s / HA validation |
-| `scripts/k8s-fix-metrics-server.sh` | Repair/check metrics-server | K8s ops |
-| `scripts/k8s-expose-demo.sh` | Expose NodePort to public host port for demo | Public demo |
-| `scripts/k8s-check-demo-exposure.sh` | Verify NodePort and host forwarding rules for public demo | Public demo |
-| `scripts/k8s-reset-local.sh` (or reset helpers) | Local reset/cleanup helper | Local recovery |
+| `scripts/k8s-distributed-ha-rebuild-all.sh` | One-command distributed HA rebuild/deploy/verification flow | `DB_MODE=ha` final demo or verification |
+| `scripts/k8s-preload-images.sh` | Image preflight and Minikube image loading | Before HA deploy, or standalone image checks |
+| `scripts/k8s-prepare-cnpg-local-storage.sh` | Prepare local storage permissions for CNPG (`26:26`) | HA staged/debug path |
+| `scripts/k8s-rebuild-and-deploy.sh` | Rebuild images, load to Minikube, apply manifests, verify deployment | Single mode default path / HA staged path |
+| `scripts/k8s-install-cnpg.sh` | Install/check CloudNativePG operator | HA setup and troubleshooting |
+| `scripts/k8s-expose-demo.sh` | Expose NodePort to public host port for demo | Public demo exposure |
+| `scripts/k8s-check-demo-exposure.sh` | Validate exposure path and forwarding rules | Public demo verification |
+| `scripts/k8s-distributed-ha-evidence.sh` | Collect distributed/HA evidence snapshot | Demo/report evidence collection |
+| `scripts/k8s-postgres-ha-status.sh` | Print CNPG/HA database status | HA runtime checks |
+| `scripts/k8s-postgres-ha-failover-test.sh` | Controlled primary-pod failover validation | Failover evaluation demo |
+| `scripts/k8s-fix-metrics-server.sh` | Repair/check metrics-server | HPA prerequisites |
+| `scripts/k8s-hpa-demo.sh` | Run HPA load demonstration | Optional autoscaling demo |
+| `scripts/k8s-test-local.sh` | Local Kubernetes smoke tests | Post-deploy sanity checks |
+| `scripts/k8s-status.sh` | Quick Kubernetes deployment status checks | Daily ops/status snapshots |
+| `scripts/test-api.sh` | Public API tests | Compose/K8s functional checks |
+| `scripts/test-admin-api.sh` | Admin API tests | Compose/K8s functional checks |
+| `scripts/test-order-consistency.sh` | Order consistency checks | HA/data consistency evaluation |
+| `scripts/compose-up.sh` | Docker Compose start helper | Local compose bring-up |
+| `scripts/compose-status.sh` | Docker Compose status helper | Local compose inspection |
+| `scripts/compose-down.sh` | Docker Compose teardown helper | Local compose shutdown |
 
 ---
 
@@ -301,7 +351,45 @@ Then open the Monitoring page in the frontend UI.
 
 ---
 
-## 15) Documentation Links
+## Appendix B: Demo Command Quick Reference
+
+Distributed HA full build:
+
+```bash
+AUTO_FIX_CNPG_PVC_PERMISSIONS=1 EXPOSE_DEMO=1 PUBLIC_PORT=3000 NODE_PORT=30080 MINIKUBE_PROFILE=bookstore-distributed NODES=3 CPUS=2 MEMORY=4096 DB_MODE=ha ./scripts/k8s-distributed-ha-rebuild-all.sh
+```
+
+Status commands:
+
+```bash
+MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-status.sh
+MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-postgres-ha-status.sh
+MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-distributed-ha-evidence.sh
+```
+
+Failover command:
+
+```bash
+MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-postgres-ha-failover-test.sh
+```
+
+HPA command:
+
+```bash
+MINIKUBE_PROFILE=bookstore-distributed ./scripts/k8s-fix-metrics-server.sh
+MINIKUBE_PROFILE=bookstore-distributed DURATION=240s CONCURRENCY=30 ./scripts/k8s-hpa-demo.sh
+```
+
+Public exposure command:
+
+```bash
+PUBLIC_PORT=3000 NODE_PORT=30080 MINIKUBE_PROFILE=bookstore-distributed ./scripts/k8s-expose-demo.sh
+MINIKUBE_PROFILE=bookstore-distributed PUBLIC_PORT=3000 NODE_PORT=30080 ./scripts/k8s-check-demo-exposure.sh
+```
+
+---
+
+## Appendix C: Additional Documentation
 
 - [Demo manual](docs/demo_manual.md)
 - [Architecture and defense notes](docs/architecture_and_defense_notes.md)
