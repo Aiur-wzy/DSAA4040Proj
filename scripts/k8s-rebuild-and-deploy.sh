@@ -335,6 +335,25 @@ apply_init_job_manifest() {
   render_init_job_manifest "$init_job_name" | "${KUBECTL[@]}" apply -f -
 }
 
+
+report_cnpg_permission_issue_hint() {
+  info "CloudNativePG Ready wait timed out; collecting diagnostics..."
+  local cluster_desc cluster_events cluster_logs
+  cluster_desc="$("${KUBECTL[@]}" describe cluster/bookstore-postgres -n "$NAMESPACE" 2>&1 || true)"
+  cluster_events="$("${KUBECTL[@]}" get events -n "$NAMESPACE" --sort-by=.lastTimestamp 2>&1 || true)"
+  cluster_logs="$("${KUBECTL[@]}" logs -n cnpg-system deployment/cnpg-cloudnative-pg --tail=200 2>&1 || true)"
+  if printf '%s
+%s
+%s
+' "$cluster_desc" "$cluster_events" "$cluster_logs" | grep -F 'could not create directory "/var/lib/postgresql/data/pgdata": Permission denied' >/dev/null; then
+    info "Detected CNPG PVC permission issue. Run:
+ MINIKUBE_PROFILE=${MINIKUBE_PROFILE:-bookstore-distributed} DB_MODE=ha ./scripts/k8s-fix-cnpg-pvc-permissions.sh"
+    if [[ "${AUTO_FIX_CNPG_PVC_PERMISSIONS:-0}" == "1" ]]; then
+      info "AUTO_FIX_CNPG_PVC_PERMISSIONS=1 set; invoking CNPG PVC permission repair helper."
+      MINIKUBE_PROFILE="${MINIKUBE_PROFILE:-bookstore-distributed}" NAMESPACE="$NAMESPACE" CLUSTER_NAME="bookstore-postgres" CNPG_POSTGRES_IMAGE="${CNPG_POSTGRES_IMAGE:-ghcr.io/cloudnative-pg/postgresql:16.4}" ./scripts/k8s-fix-cnpg-pvc-permissions.sh || true
+    fi
+  fi
+}
 print_init_job_diagnostics() {
   local init_job_name="$1"
 
@@ -460,7 +479,10 @@ configure_ha_database() {
   "${KUBECTL[@]}" apply -f k8s/postgres-ha/app-secret.yaml
   "${KUBECTL[@]}" apply -f k8s/postgres-ha/cluster.yaml
   info "Waiting for CloudNativePG Cluster/bookstore-postgres to report Ready=True..."
-  "${KUBECTL[@]}" wait --for=condition=Ready cluster/bookstore-postgres -n "$NAMESPACE" --timeout=300s
+  if ! "${KUBECTL[@]}" wait --for=condition=Ready cluster/bookstore-postgres -n "$NAMESPACE" --timeout=300s; then
+    report_cnpg_permission_issue_hint
+    return 1
+  fi
 }
 
 configure_single_database() {
