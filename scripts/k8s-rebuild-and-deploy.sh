@@ -338,21 +338,68 @@ apply_init_job_manifest() {
 
 report_cnpg_permission_issue_hint() {
   info "CloudNativePG Ready wait timed out; collecting diagnostics..."
-  local cluster_desc cluster_events cluster_logs
+  local cluster_desc cluster_events initdb_pods initdb_logs stuck_dangling no_initdb_job no_primary_pod
+
+  "${KUBECTL[@]}" get pods,pvc,job -n "$NAMESPACE" || true
+  "${KUBECTL[@]}" get cluster bookstore-postgres -n "$NAMESPACE" || true
+
   cluster_desc="$("${KUBECTL[@]}" describe cluster/bookstore-postgres -n "$NAMESPACE" 2>&1 || true)"
+  printf '%s
+' "$cluster_desc"
+
   cluster_events="$("${KUBECTL[@]}" get events -n "$NAMESPACE" --sort-by=.lastTimestamp 2>&1 || true)"
-  cluster_logs="$("${KUBECTL[@]}" logs -n cnpg-system deployment/cnpg-cloudnative-pg --tail=200 2>&1 || true)"
+  printf '%s
+' "$cluster_events"
+
+  initdb_pods="$("${KUBECTL[@]}" get pods -n "$NAMESPACE" -o name 2>/dev/null | grep 'bookstore-postgres-1-initdb-' || true)"
+  initdb_logs=""
+  if [[ -n "$initdb_pods" ]]; then
+    while IFS= read -r pod; do
+      [[ -z "$pod" ]] && continue
+      info "Recent logs from ${pod}:"
+      local pod_logs
+      pod_logs="$("${KUBECTL[@]}" logs -n "$NAMESPACE" "$pod" --all-containers=true --tail=200 2>&1 || true)"
+      printf '%s
+' "$pod_logs"
+      initdb_logs+="$pod_logs"$'
+'
+    done <<< "$initdb_pods"
+  fi
+
   if printf '%s
 %s
+' "$cluster_desc" "$initdb_logs" | grep -F 'Permission denied' >/dev/null      && printf '%s
 %s
-' "$cluster_desc" "$cluster_events" "$cluster_logs" | grep -F 'could not create directory "/var/lib/postgresql/data/pgdata": Permission denied' >/dev/null; then
-    info "Detected CNPG PVC permission issue. Run:
- MINIKUBE_PROFILE=${MINIKUBE_PROFILE:-bookstore-distributed} DB_MODE=ha ./scripts/k8s-fix-cnpg-pvc-permissions.sh"
+' "$cluster_desc" "$initdb_logs" | grep -F '/var/lib/postgresql/data/pgdata' >/dev/null; then
+    info "Detected CloudNativePG hostPath PVC permission issue."
     if [[ "${AUTO_FIX_CNPG_PVC_PERMISSIONS:-0}" == "1" ]]; then
       info "AUTO_FIX_CNPG_PVC_PERMISSIONS=1 set; invoking CNPG PVC permission repair helper."
-      MINIKUBE_PROFILE="${MINIKUBE_PROFILE:-bookstore-distributed}" NAMESPACE="$NAMESPACE" CLUSTER_NAME="bookstore-postgres" CNPG_POSTGRES_IMAGE="${CNPG_POSTGRES_IMAGE:-ghcr.io/cloudnative-pg/postgresql:16.4}" ./scripts/k8s-fix-cnpg-pvc-permissions.sh || true
+      MINIKUBE_PROFILE="${MINIKUBE_PROFILE:-bookstore-distributed}" DB_MODE=ha NAMESPACE="$NAMESPACE" CLUSTER_NAME="bookstore-postgres" CNPG_POSTGRES_IMAGE="${CNPG_POSTGRES_IMAGE:-ghcr.io/cloudnative-pg/postgresql:16.4}" FORCE_DELETE_DANGLING_CNPG_PVC="${FORCE_DELETE_DANGLING_CNPG_PVC:-0}" ./scripts/k8s-fix-cnpg-pvc-permissions.sh
+      info "Re-waiting for CloudNativePG Cluster/bookstore-postgres to report Ready=True after repair..."
+      "${KUBECTL[@]}" wait --for=condition=Ready cluster/bookstore-postgres -n "$NAMESPACE" --timeout=300s
+      return 0
     fi
   fi
+
+  stuck_dangling="$("${KUBECTL[@]}" get cluster bookstore-postgres -n "$NAMESPACE" -o jsonpath='{.status.danglingPVC}' 2>/dev/null || true)"
+  no_initdb_job="$("${KUBECTL[@]}" get jobs -n "$NAMESPACE" -o name 2>/dev/null | grep -F 'bookstore-postgres-1-initdb' || true)"
+  no_primary_pod="$("${KUBECTL[@]}" get pod -n "$NAMESPACE" bookstore-postgres-1 -o name 2>/dev/null || true)"
+
+  if [[ "$stuck_dangling" == *bookstore-postgres-1* && -z "$no_initdb_job" && -z "$no_primary_pod" ]]; then
+    if [[ "${FORCE_DELETE_DANGLING_CNPG_PVC:-0}" == "1" ]]; then
+      info "Detected dangling failed-new-init PVC and FORCE_DELETE_DANGLING_CNPG_PVC=1 is set; invoking repair helper."
+      MINIKUBE_PROFILE="${MINIKUBE_PROFILE:-bookstore-distributed}" DB_MODE=ha NAMESPACE="$NAMESPACE" CLUSTER_NAME="bookstore-postgres" CNPG_POSTGRES_IMAGE="${CNPG_POSTGRES_IMAGE:-ghcr.io/cloudnative-pg/postgresql:16.4}" FORCE_DELETE_DANGLING_CNPG_PVC=1 ./scripts/k8s-fix-cnpg-pvc-permissions.sh
+      info "Re-waiting for CloudNativePG Cluster/bookstore-postgres to report Ready=True after dangling PVC recovery..."
+      "${KUBECTL[@]}" wait --for=condition=Ready cluster/bookstore-postgres -n "$NAMESPACE" --timeout=300s
+      return 0
+    fi
+
+    info "Detected dangling failed-new-init PVC recovery condition. Run exactly:"
+    info "FORCE_DELETE_DANGLING_CNPG_PVC=1 MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-fix-cnpg-pvc-permissions.sh"
+    info "This force-delete path is only safe for failed brand-new initialization, never for real databases with data."
+  fi
+
+  return 1
 }
 print_init_job_diagnostics() {
   local init_job_name="$1"
@@ -480,8 +527,7 @@ configure_ha_database() {
   "${KUBECTL[@]}" apply -f k8s/postgres-ha/cluster.yaml
   info "Waiting for CloudNativePG Cluster/bookstore-postgres to report Ready=True..."
   if ! "${KUBECTL[@]}" wait --for=condition=Ready cluster/bookstore-postgres -n "$NAMESPACE" --timeout=300s; then
-    report_cnpg_permission_issue_hint
-    return 1
+    report_cnpg_permission_issue_hint || return 1
   fi
 }
 
