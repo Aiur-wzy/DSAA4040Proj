@@ -130,6 +130,8 @@ echo "Duration: ${DURATION}"
 echo "Concurrency: ${CONCURRENCY}"
 echo "Watch interval: ${WATCH_INTERVAL}s"
 echo "Observe scale down: ${OBSERVE_SCALE_DOWN}"
+echo "Monitoring Dashboard URL: http://$(minikube ip):${NODE_PORT}/?page=monitoring"
+echo "Expected dashboard refresh delay: ~2 seconds (plus Kubernetes/metrics-server sampling lag)."
 
 "${KUBECTL[@]}" get namespace "$NAMESPACE" >/dev/null || fail "namespace/${NAMESPACE} does not exist. Deploy the app first."
 "${KUBECTL[@]}" get deployment "$BACKEND_DEPLOYMENT" -n "$NAMESPACE" >/dev/null || fail "deployment/${BACKEND_DEPLOYMENT} does not exist in namespace/${NAMESPACE}."
@@ -149,6 +151,7 @@ fi
 echo
 echo "CPU utilization note: HPA CPU percentage is relative to each container's CPU request, not total node CPU."
 echo "For example, if public-backend requests 100m CPU and uses 300m CPU, HPA can report about 300%."
+echo "Dashboard reminder: /api/admin/cluster/status shows Kubernetes-observed state (metrics-server + HPA controller loops), not per-request instant CPU."
 echo "This script verifies and demonstrates the public-backend HPA; it does not modify HPA configuration."
 
 INITIAL_REPLICAS="$(current_replicas)"

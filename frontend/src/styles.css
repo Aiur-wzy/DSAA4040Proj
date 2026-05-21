@@ -237,6 +237,15 @@ button:disabled {
   background: #fef3c7;
   color: #92400e;
 }
+.health-green {
+  border-left: 6px solid #16a34a;
+}
+.health-yellow {
+  border-left: 6px solid #ca8a04;
+}
+.health-red {
+  border-left: 6px solid #dc2626;
+}
 
 .monitoring-chart svg {
   width: 100%;
