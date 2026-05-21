@@ -21,6 +21,11 @@ if [[ "$DB_MODE" == "ha" ]]; then
   DB_SERVICE="bookstore-postgres-rw"
 fi
 COMMAND="${1:-all}"
+CLUSTER_MANIFEST="${CLUSTER_MANIFEST:-k8s/postgres-ha/cluster.yaml}"
+if [[ "${DISTRIBUTED_HA_MODE:-0}" == "1" ]]; then
+  CLUSTER_MANIFEST="k8s/postgres-ha/cluster-distributed.yaml"
+fi
+
 VALID_COMMANDS=(all install-cnpg apply-ha-database init-db deploy-app verify-app)
 BACKEND_DEPLOYMENTS=(public-backend admin-backend monitoring-backend)
 BACKEND_SELECTORS=(app=public-backend app=admin-backend app=monitoring-backend)
@@ -394,9 +399,8 @@ report_cnpg_permission_issue_hint() {
       return 0
     fi
 
-    info "Detected dangling failed-new-init PVC recovery condition. Run exactly:"
-    info "FORCE_DELETE_DANGLING_CNPG_PVC=1 MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-fix-cnpg-pvc-permissions.sh"
-    info "This force-delete path is only safe for failed brand-new initialization, never for real databases with data."
+    info "Cluster is unrecoverable after failed new initialization. Delete Cluster/bookstore-postgres and rerun apply-ha-database, or run the distributed workflow which prepares local storage first."
+    info "FORCE_DELETE_DANGLING_CNPG_PVC=1 remains a last-resort fresh-init recovery and recreates the Cluster resource (not only PVC)."
   fi
 
   return 1
@@ -524,7 +528,7 @@ configure_ha_database() {
     "${KUBECTL[@]}" scale deployment/postgres -n "$NAMESPACE" --replicas=0
   fi
   "${KUBECTL[@]}" apply -f k8s/postgres-ha/app-secret.yaml
-  "${KUBECTL[@]}" apply -f k8s/postgres-ha/cluster.yaml
+  "${KUBECTL[@]}" apply -f "$CLUSTER_MANIFEST"
   info "Waiting for CloudNativePG Cluster/bookstore-postgres to report Ready=True..."
   if ! "${KUBECTL[@]}" wait --for=condition=Ready cluster/bookstore-postgres -n "$NAMESPACE" --timeout=300s; then
     report_cnpg_permission_issue_hint || return 1
@@ -613,7 +617,7 @@ apply_manifests() {
       "${KUBECTL[@]}" scale deployment/postgres -n "$NAMESPACE" --replicas=0
     fi
     "${KUBECTL[@]}" apply -f k8s/postgres-ha/app-secret.yaml
-    "${KUBECTL[@]}" apply -f k8s/postgres-ha/cluster.yaml
+    "${KUBECTL[@]}" apply -f "$CLUSTER_MANIFEST"
     info "Waiting for CloudNativePG Cluster/bookstore-postgres to report Ready=True..."
     "${KUBECTL[@]}" wait --for=condition=Ready cluster/bookstore-postgres -n "$NAMESPACE" --timeout=300s
     init_job_name="postgres-init-ha"

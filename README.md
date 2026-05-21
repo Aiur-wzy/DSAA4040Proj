@@ -890,3 +890,14 @@ Screenshot/evidence checklist for the final report:
 - CPU chart showing utilization rising above target
 - public-backend Pods table showing new Pods
 - Monitoring page after load showing scale-down if captured
+
+## CloudNativePG distributed HA storage preparation (Minikube multi-node)
+
+For distributed HA on Minikube, the preferred path is now **preparing CNPG local storage first** (UID/GID `26:26`) and then creating the CloudNativePG Cluster. Do not rely on post-failure PVC-only deletion as the main recovery strategy.
+
+```bash
+MINIKUBE_PROFILE=bookstore-distributed ./scripts/k8s-prepare-cnpg-local-storage.sh
+AUTO_FIX_CNPG_PVC_PERMISSIONS=1 MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh apply-ha-database
+```
+
+`FORCE_DELETE_DANGLING_CNPG_PVC=1` is now a **last-resort fresh-init recovery only** path. It is intended for failed brand-new initialization and recreates the CNPG Cluster resource; do not use it for real databases with data.
