@@ -79,7 +79,17 @@ MINIKUBE_PROFILE="$MINIKUBE_PROFILE" DB_MODE=ha ./scripts/k8s-rebuild-and-deploy
 
 preload_cnpg_postgres_image
 
-run_stage apply-ha-database
+if ! run_stage apply-ha-database; then
+  warn "apply-ha-database failed. If logs show initdb permission denied on /var/lib/postgresql/data/pgdata, run:"
+  warn "  MINIKUBE_PROFILE=${MINIKUBE_PROFILE} DB_MODE=ha ./scripts/k8s-fix-cnpg-pvc-permissions.sh"
+  if [[ "${AUTO_FIX_CNPG_PVC_PERMISSIONS:-0}" == "1" ]]; then
+    info "AUTO_FIX_CNPG_PVC_PERMISSIONS=1 set; running CNPG PVC permission repair helper."
+    MINIKUBE_PROFILE="$MINIKUBE_PROFILE" NAMESPACE="bookstore" CLUSTER_NAME="bookstore-postgres" CNPG_POSTGRES_IMAGE="$CNPG_POSTGRES_IMAGE" ./scripts/k8s-fix-cnpg-pvc-permissions.sh
+    run_stage apply-ha-database
+  else
+    exit 1
+  fi
+fi
 run_stage init-db
 run_stage deploy-app
 run_stage verify-app

@@ -643,6 +643,29 @@ DB_MODE=ha ./scripts/k8s-postgres-ha-failover-test.sh
 
 Minikube is a resource-limited demo environment, not production-grade distributed infrastructure. Three PostgreSQL HA pods plus the application, Ingress, and `metrics-server` may require more memory, preferably 6GB+ if available, and Minikube may still place all PostgreSQL instances on one node without real production fault domains.
 
+
+### CloudNativePG initdb permission denied on Minikube hostPath PVC
+
+On some Minikube hostPath-backed volumes, the initial CloudNativePG data path can be created as `root:root`. CloudNativePG PostgreSQL runs as UID/GID `26`, so `initdb` can fail with:
+
+```text
+initdb: error: could not create directory "/var/lib/postgresql/data/pgdata": Permission denied
+```
+
+Use the non-destructive recovery helper:
+
+```bash
+MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-fix-cnpg-pvc-permissions.sh
+```
+
+If the cluster is stuck with a dangling initializing PVC and no new initdb job appears, a force-delete path exists for failed *new* cluster initialization only:
+
+```bash
+FORCE_DELETE_DANGLING_CNPG_PVC=1 MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-fix-cnpg-pvc-permissions.sh
+```
+
+⚠️ `FORCE_DELETE_DANGLING_CNPG_PVC=1` must **not** be used for real databases with data. It is intended only for recovery from failed brand-new initialization.
+
 For production, migrate to real multi-VM Kubernetes or managed Kubernetes with production-grade `LoadBalancer`/Ingress exposure, CSI storage, DNS/TLS, production secrets, an external image registry, backup/restore, Prometheus/Grafana monitoring, and disaster recovery planning. `DB_MODE=single` remains the stable default workflow.
 
 For deeper details, see [PostgreSQL HA experiment](docs/postgres_ha_experiment.md).
