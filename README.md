@@ -595,7 +595,7 @@ Deploy HA mode with the staged workflow:
 
 ```bash
 DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh install-cnpg
-DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh apply-ha-database
+AUTO_FIX_CNPG_PVC_PERMISSIONS=1 MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh apply-ha-database
 DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh init-db
 DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh deploy-app
 DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh verify-app
@@ -652,17 +652,19 @@ On some Minikube hostPath-backed volumes, the initial CloudNativePG data path ca
 initdb: error: could not create directory "/var/lib/postgresql/data/pgdata": Permission denied
 ```
 
-Use the non-destructive recovery helper:
+Preferred self-contained command (auto-detects permission issue and runs the repair helper automatically):
 
 ```bash
-MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-fix-cnpg-pvc-permissions.sh
+AUTO_FIX_CNPG_PVC_PERMISSIONS=1 MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh apply-ha-database
 ```
 
-If the cluster is stuck with a dangling initializing PVC and no new initdb job appears, a force-delete path exists for failed *new* cluster initialization only:
+If this is a failed brand-new initialization and CloudNativePG gets stuck with a dangling initializing PVC, use one-command recovery mode:
 
 ```bash
-FORCE_DELETE_DANGLING_CNPG_PVC=1 MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-fix-cnpg-pvc-permissions.sh
+AUTO_FIX_CNPG_PVC_PERMISSIONS=1 FORCE_DELETE_DANGLING_CNPG_PVC=1 MINIKUBE_PROFILE=bookstore-distributed DB_MODE=ha ./scripts/k8s-rebuild-and-deploy.sh apply-ha-database
 ```
+
+This mode creates namespace/Cluster/PVC, detects permission failure, runs the repair Job with `ghcr.io/cloudnative-pg/postgresql:16.4`, handles failed-new-init dangling PVC only when `FORCE_DELETE_DANGLING_CNPG_PVC=1`, and then waits again for `Cluster/bookstore-postgres` to become Ready.
 
 ⚠️ `FORCE_DELETE_DANGLING_CNPG_PVC=1` must **not** be used for real databases with data. It is intended only for recovery from failed brand-new initialization.
 

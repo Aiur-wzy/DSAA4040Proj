@@ -35,6 +35,11 @@ job_name="cnpg-pvc-permission-repair-${CLUSTER_NAME}-$(date +%s)"
 info "Using Kubernetes command: ${KUBECTL_MODE}"
 info "Namespace=${NAMESPACE} Cluster=${CLUSTER_NAME} PVC=${PVC_NAME} Image=${CNPG_POSTGRES_IMAGE}"
 
+if ! "${KUBECTL[@]}" get namespace "$NAMESPACE" >/dev/null 2>&1; then
+  info "Run apply-ha-database first."
+  exit 0
+fi
+
 info "Checking CNPG cluster and PVC state"
 "${KUBECTL[@]}" get cluster "$CLUSTER_NAME" -n "$NAMESPACE" >/dev/null || fail "Cluster/$CLUSTER_NAME not found in namespace $NAMESPACE"
 ready="$(${KUBECTL[@]} get cluster "$CLUSTER_NAME" -n "$NAMESPACE" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
