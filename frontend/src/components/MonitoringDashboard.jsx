@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getClusterStatus } from "../api";
 
-const REFRESH_MS = 5000;
-const MAX_SAMPLES = 60;
+const REFRESH_MS = 2000;
+const MAX_SAMPLES = 30;
 
 function formatValue(value, fallback = "—") {
   return value === null || value === undefined ? fallback : value;
@@ -39,10 +39,10 @@ function scalingState(status) {
 }
 
 function sampleFromStatus(status) {
-  const now = new Date();
+  const observed = status?.timestamp ? new Date(status.timestamp) : new Date();
   return {
-    timestamp: now.toISOString(),
-    label: now.toLocaleTimeString(),
+    timestamp: observed.toISOString(),
+    label: observed.toLocaleTimeString(),
     desiredReplicas: status?.deployment?.desiredReplicas ?? null,
     readyReplicas: status?.deployment?.readyReplicas ?? null,
     hpaCurrentReplicas: status?.hpa?.currentReplicas ?? null,
@@ -161,6 +161,9 @@ function MonitoringDashboard({ onBack }) {
   const dbWarnings = db?.warnings || [];
   const warnings = [...(status?.warnings || []), ...dbWarnings];
   const hasClusterError = Boolean(status?.error || error);
+  const deploymentLagging = (deployment.desiredReplicas || 0) > (deployment.readyReplicas || 0);
+  const dbUnavailable = db.mode === "ha" && !db.primaryPod;
+  const healthLevel = hasClusterError || dbUnavailable ? "red" : (!status?.metricsAvailable || deploymentLagging ? "yellow" : "green");
 
   return (
     <div className="monitoring-page">
@@ -168,7 +171,7 @@ function MonitoringDashboard({ onBack }) {
         <div>
           <h1>Monitoring / HPA Dashboard</h1>
           <p className="muted">
-            Read-only Kubernetes status for the public-backend Deployment, HPA, and Pods. Auto-refreshes every 5 seconds.
+            Read-only Kubernetes status for the public-backend Deployment, HPA, and Pods. Auto-refreshes every 2 seconds.
           </p>
         </div>
         <div className="header-actions">
@@ -193,6 +196,15 @@ function MonitoringDashboard({ onBack }) {
       {warnings.map((warning) => (
         <div className="status warning" key={warning}>{warning}</div>
       ))}
+
+      <section className={`panel health-${healthLevel}`}>
+        <h2>Cluster Monitoring Summary</h2>
+        <dl className="metric-grid">
+          <dt>Last updated</dt><dd>{formatValue(status?.timestamp)}</dd>
+          <dt>Metrics availability</dt><dd>{status?.metricsAvailable ? "Available" : "Unavailable"}</dd>
+          <dt>Health indicator</dt><dd><strong>{healthLevel.toUpperCase()}</strong></dd>
+        </dl>
+      </section>
 
       <div className="monitoring-cards">
         <MetricCard title="public-backend Deployment">
@@ -259,6 +271,27 @@ function MonitoringDashboard({ onBack }) {
       </div>
 
       <section className="panel">
+        <h2>Recent Relevant Events</h2>
+        <div className="table-wrap">
+          <table className="pods-table">
+            <thead><tr><th>Time</th><th>Type</th><th>Reason</th><th>Object</th><th>Message</th></tr></thead>
+            <tbody>
+              {(status?.events || []).map((event, idx) => (
+                <tr key={`${event.timestamp || "na"}-${event.reason || "na"}-${idx}`}>
+                  <td>{formatTime(event.timestamp)}</td>
+                  <td>{formatValue(event.type)}</td>
+                  <td>{formatValue(event.reason)}</td>
+                  <td>{formatValue(`${event?.involvedObject?.kind || ""}/${event?.involvedObject?.name || ""}`)}</td>
+                  <td>{formatValue(event.message)}</td>
+                </tr>
+              ))}
+              {!(status?.events || []).length ? <tr><td colSpan="5" className="muted">No recent events reported.</td></tr> : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="panel">
         <h2>public-backend Pods</h2>
         <div className="table-wrap">
           <table className="pods-table">
@@ -270,6 +303,7 @@ function MonitoringDashboard({ onBack }) {
                 <th>Restarts</th>
                 <th>CPU</th>
                 <th>Memory</th>
+                <th>Node</th>
                 <th>Start time</th>
               </tr>
             </thead>
@@ -282,12 +316,13 @@ function MonitoringDashboard({ onBack }) {
                   <td>{pod.restartCount}</td>
                   <td>{formatValue(pod.cpu)}</td>
                   <td>{formatValue(pod.memory)}</td>
+                  <td>{formatValue(pod.nodeName)}</td>
                   <td>{formatTime(pod.startTime)}</td>
                 </tr>
               ))}
               {!pods.length ? (
                 <tr>
-                  <td colSpan="7" className="muted">No public-backend Pods reported yet.</td>
+                  <td colSpan="8" className="muted">No public-backend Pods reported yet.</td>
                 </tr>
               ) : null}
             </tbody>

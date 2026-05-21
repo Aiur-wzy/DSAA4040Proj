@@ -1,7 +1,7 @@
 import os
-from datetime import timezone
+from datetime import datetime, timezone
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 from kubernetes import client, config
 from kubernetes.config.config_exception import ConfigException
 
@@ -202,6 +202,7 @@ def _pod_summaries(core_api, metrics_by_pod, warnings):
                 "phase": pod.status.phase,
                 "ready": _pod_ready(pod),
                 "restartCount": _pod_restart_count(pod),
+                "nodeName": pod.spec.node_name if pod.spec else None,
                 "startTime": _isoformat(pod.status.start_time),
                 "cpu": usage.get("cpu"),
                 "memory": usage.get("memory"),
@@ -209,6 +210,60 @@ def _pod_summaries(core_api, metrics_by_pod, warnings):
         )
     return sorted(pods, key=lambda item: item["name"])
 
+def _event_timestamp(event):
+    return (
+        getattr(event, "event_time", None)
+        or getattr(event, "last_timestamp", None)
+        or getattr(event, "first_timestamp", None)
+        or getattr(event.metadata, "creation_timestamp", None)
+    )
+
+
+def _event_summary(event):
+    return {
+        "type": event.type,
+        "reason": event.reason,
+        "message": event.message,
+        "involvedObject": {
+            "kind": event.involved_object.kind if event.involved_object else None,
+            "name": event.involved_object.name if event.involved_object else None,
+        },
+        "count": event.count,
+        "timestamp": _isoformat(_event_timestamp(event)),
+    }
+
+
+def _recent_events(core_api, warnings, limit=20):
+    selectors = [
+        f"involvedObject.kind=HorizontalPodAutoscaler,involvedObject.name={BACKEND_HPA}",
+        f"involvedObject.kind=Deployment,involvedObject.name={BACKEND_DEPLOYMENT}",
+    ]
+    if DB_MODE == "ha":
+        selectors.append(f"involvedObject.kind=Cluster,involvedObject.name={CNPG_CLUSTER_NAME}")
+
+    events = []
+    for selector in selectors:
+        try:
+            response = core_api.list_namespaced_event(NAMESPACE, field_selector=selector)
+            events.extend(response.items or [])
+        except Exception as exc:
+            warnings.append(f"Unable to read events ({selector}): {_error_reason(exc)}")
+
+    dedup = {}
+    for event in events:
+        key = (
+            getattr(event.metadata, "uid", None)
+            or f"{event.involved_object.kind if event.involved_object else ''}:{event.involved_object.name if event.involved_object else ''}:{event.reason}:{event.message}"
+        )
+        dedup[key] = event
+
+    sorted_events = sorted(
+        dedup.values(),
+        key=lambda event: _event_timestamp(event) or 0,
+        reverse=True,
+    )
+
+    return [_event_summary(event) for event in sorted_events[:limit]]
 
 def _service_summary(service):
     return {
@@ -307,10 +362,17 @@ def _db_status(core_api, custom_api):
 
 
 @router.get("/status")
-def get_cluster_status():
+def get_cluster_status(response: Response):
     loaded, error = _load_kubernetes_config()
+    response.headers["Cache-Control"] = "no-store, no-cache, max-age=0, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+
     if not loaded:
-        return _empty_status(warnings=[KUBERNETES_UNAVAILABLE_WARNING], error=error)
+        status = _empty_status(warnings=[KUBERNETES_UNAVAILABLE_WARNING], error=error)
+        status["timestamp"] = _isoformat(datetime.now(timezone.utc))
+        status["events"] = []
+        return status
 
     warnings = []
     apps_api = client.AppsV1Api()
@@ -323,8 +385,10 @@ def get_cluster_status():
     metrics_by_pod, metrics_available = _pod_metrics(custom_api, warnings)
     pods = _pod_summaries(core_api, metrics_by_pod, warnings)
     db = _db_status(core_api, custom_api)
+    events = _recent_events(core_api, warnings, limit=20)
 
     return {
+        "timestamp": _isoformat(datetime.now(timezone.utc)),
         "namespace": NAMESPACE,
         "deployment": deployment,
         "hpa": hpa,
@@ -332,4 +396,5 @@ def get_cluster_status():
         "db": db,
         "metricsAvailable": metrics_available,
         "warnings": warnings,
+        "events": events,
     }

@@ -237,8 +237,19 @@ Public exposure scope/safety:
 ```
 
 - Monitoring page reads `/api/admin/cluster/status`.
+- Monitoring Dashboard auto-refreshes every **2 seconds**.
 - `metrics-server` is required for CPU/memory metrics and HPA behavior.
+- HPA scale-up still may take tens of seconds because `metrics-server` and the HPA controller use their own sampling/reconciliation loops.
 - Run HPA demo after core app functionality is confirmed.
+
+Recommended demo sequence:
+
+```bash
+MINIKUBE_PROFILE=bookstore-distributed ./scripts/k8s-fix-metrics-server.sh
+MINIKUBE_PROFILE=bookstore-distributed DURATION=240s CONCURRENCY=30 ./scripts/k8s-hpa-demo.sh
+```
+
+Then open the Monitoring page in the frontend UI.
 
 ---
 
